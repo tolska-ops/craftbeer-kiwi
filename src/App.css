@@ -83,3 +83,23 @@ html, body, #root {
 .popup-content a:hover {
   text-decoration: underline;
 }
+.cluster-pin {
+  background: #D4720A;
+  color: white;
+  font-weight: 700;
+  font-size: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: 2px solid #FFF;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  transition: transform 0.15s ease;
+}
+
+.cluster-pin:hover {
+  transform: scale(1.1);
+}
