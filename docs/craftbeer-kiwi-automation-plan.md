@@ -24,7 +24,7 @@ This means the NZBN API needs its own free subscription key (same admin-task cat
 - **Ministry of Justice Register of Licences & Certificates** — the *strongest* signal in principle (a brewery genuinely can't legally sell alcohol without an active on/off-licence), but it's a quarterly bulk file, not a live API. Filed as a **Phase 2 enhancement** below, not part of the initial build.
 - **Untappd** — excellent for a human to manually spot-check whether a brewery's genuinely still trading (recent check-in dates are a strong "still alive" signal), but its public API has been largely closed to new developers for some years. Not usable as an automated pipeline input — flagged here so future-you doesn't waste time trying.
 - **Facebook / Instagram** — same story as Untappd: good manual check (recent posts = still open), no realistic API path for a small side project (Meta requires business app review for this kind of lookup).
-- **Brewers Guild of NZ / NZ Ale Trail** — a real industry body with a member directory, useful for manual discovery cross-checks (worth searching before adding a new region), but no API and not appropriate to scrape into an automated job.
+- **Brewers Guild of NZ / NZ Ale Trail** — stronger than initially assessed. Their annual report (published as a PDF each year, e.g. the 2024-25 report) includes a real, current member list broken down by tier (Micro/Small/Medium/Large brewery members). Cross-checked against today's 18 breweries: Waitoa, Panhead, Garage Project, Choice Bros, Duncan's, Heyday, and North End all confirmed as current Guild members — a genuine independent validation of the existing directory. Also surfaced **Martinborough Brewery** (Wairarapa, Micro tier) as a candidate worth considering if the directory expands beyond Wellington city/Hutt Valley/Kāpiti. Still not an API — it's an annual PDF, so useful as an on-demand manual cross-check once a year, not an automated pipeline input.
 - **Beervana** (Wellington's annual beer festival, run by the Wellington Culinary Events Trust) — genuinely useful for two manual purposes: confirming an established brewery is still actively trading (exhibitor lists refresh yearly, so a current-year listing is a good "still alive" signal), and catching brand-new breweries via the festival's dedicated "New Kids On The Block" stand, which specifically showcases breweries that opened in the previous 12 months. Not comprehensive (only ~60-70 breweries exhibit each year) and absence from the list isn't evidence of closure — just a good, low-noise discovery/confirmation source to check manually, same category as Untappd and Brewers Guild.
 - **Brewers Association of NZ national list** (brewers.org.nz/beer-in-nz) — a full regional breakdown of NZ breweries, but explicitly dated "2016" at the bottom of the page. Confirmed stale (missing both Waitoa and Fortune Favours, includes mainstream corporate brands like Tui/Monteith's/Speight's alongside genuine craft breweries). Not a data source to trust directly — but worth a manual scan as a name checklist next time doing a discovery pass (e.g. expanding beyond Wellington), cross-checking every name against Places/NZBN before adding anything, same as today's approach with the 18 Wellington breweries.
 
@@ -154,6 +154,15 @@ This is realistically **2-4 sessions** of work at your usual pace, not a single 
 
 ---
 
+## Manual cross-checks (not automated — a once- or twice-a-year habit, not a pipeline step)
+
+These sources don't have APIs and aren't part of the scheduled Edge Function. Worth a quick manual glance on roughly this cadence:
+
+- **Brewers Guild annual report** — published each year (usually mid-year, after the AGM). When the new one drops, spot-check its member list against your directory: anything newly listed that you're missing, anything you have that's dropped off. Also a good moment to reconsider Martinborough Brewery (Wairarapa) if scope ever expands past Wellington/Hutt/Kāpiti.
+- **Beervana exhibitor list** — refreshes each year ahead of the August festival. Worth a glance for the "New Kids On The Block" stand specifically (new breweries from the past 12 months) and as a "still trading" spot-check for anything the automated system flagged as uncertain.
+
+Neither of these needs a calendar reminder or anything formal — just worth doing whenever you happen to be in the app doing other work around those times of year.
+
 ## Phase 2 (future enhancement, not part of the initial build)
 
 **Ministry of Justice — Register of Licences & Certificates**, as a third, even-stronger verification signal. A brewery legally cannot sell alcohol without an active on-licence or off-licence under the Sale and Supply of Alcohol Act 2012 — so a brewery dropping off this register is about as authoritative a "no longer trading" signal as exists.
@@ -163,5 +172,6 @@ Not part of the first build because it's a bulk file (updated quarterly — Feb/
 ## Open questions to think about before/during next session
 
 - **Region scope**: start with Wellington-only automation (matches current data), or build for national from the start since the code doesn't really care? (Recommend: keep Wellington-scoped for now, it's simpler to verify correctness, expand the search query's geographic bounds later once trusted.)
+- **National expansion, when it happens**: use the same manual cross-checks listed above (Brewers Guild annual report, Brewers Association national list, NZ Ale Trail, Beervana) as the *starting checklist* — pull names from each, cross-verify every one against Places/NZBN before adding, same standard applied to today's 18 Wellington breweries. Don't skip verification just because a name appears on an "official-looking" list — today's research caught the Brewers Association's list being a decade stale, so treat every source as a lead to check, not a fact to trust.
 - **Schedule frequency**: weekly is a reasonable default, but worth deciding based on how "urgent" catching a closure feels vs. API cost.
 - **Manual override**: should there be a simple way to force `is_active = false` on a brewery manually (e.g. if you hear about a closure before automation catches it)? Worth a tiny admin tool or just doing it via Supabase's Table Editor directly — the latter is fine for now, no need to build UI for this yet.
