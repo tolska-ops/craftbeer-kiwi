@@ -53,11 +53,13 @@ Full automation means changes publish to the live site without a human looking a
 alter table breweries add column is_active boolean default true;
 alter table breweries add column last_verified timestamp with time zone default now();
 alter table breweries add column place_id text;
+alter table breweries add column flagged_for_review boolean default false;
 ```
 
 - `is_active` — the soft-delete flag. The map/app should filter `where is_active = true` from here on.
 - `last_verified` — timestamp of the last automated check. Useful for spotting rows the automation hasn't successfully checked in a while.
 - `place_id` — Google's own unique ID for each place. Store this for every existing brewery too (requires a one-off lookup per brewery to backfill — see step 4). This is what lets future automated syncs match reliably, instead of trying to match on name/address text (which is fragile — e.g. "Fork & Brewer" vs "Fork and Brewer" vs "FORK & BREWER").
+- `flagged_for_review` — set to `true` when the two verification sources disagree, or a brewery's freshly auto-inserted. Surfaced by the exceptions report (see step 3b) rather than acted on automatically.
 
 **Also update `App.jsx`'s Supabase fetch** to filter on `is_active`:
 ```javascript
@@ -103,7 +105,26 @@ Edge Functions run on Supabase's servers, written in TypeScript/Deno (different 
 - Deploy the function (`supabase functions deploy`)
 - Test it manually first (trigger it via a direct HTTP call) before scheduling it
 
-### 4. Backfill `place_id` for the existing 17 breweries
+### 3b. Exceptions report — a single place to see what needs a human look
+
+Rather than a `flagged_for_review` value sitting quietly in the table, give it a proper, glanceable output. After each automated run, one query surfaces everything worth a look:
+
+```sql
+select name, address, is_active, last_verified, flagged_for_review
+from breweries
+where flagged_for_review = true
+   or last_verified < now() - interval '14 days'
+order by last_verified asc;
+```
+
+This catches three distinct situations in one place:
+- **Source disagreement** — Places and NZBN didn't agree on a closure, so nothing was auto-published, but it's flagged for you to check by hand
+- **Newly auto-inserted breweries** — worth a quick eyeball before fully trusting an automated insert, at least while the system's new and unproven
+- **Stale rows** — anything the automation failed to successfully check recently (API error, rate limit, name-matching failure), so you're not silently trusting data that's actually gone unverified
+
+Keep this as a saved SQL query in Supabase's SQL Editor for now (Supabase supports saving queries) rather than building a dedicated admin page — a proper review UI is a nice-to-have once the underlying automation is proven reliable, not a day-one requirement. Add a `flagged_for_review boolean default false` column alongside the other schema changes in step 1 to support this.
+
+### 4. Backfill `place_id` for the existing breweries — ✅ done 13 July
 
 Before the sync function is useful, the 17 existing rows need their `place_id` filled in — otherwise the closure-check step (1, above) has nothing to check them against, and the discovery step (2, above) might re-insert them as "new" duplicates.
 
