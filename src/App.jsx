@@ -42,7 +42,7 @@ function App() {
 
   useEffect(() => {
     async function fetchBreweries() {
-      const { data, error } = await supabase.from('breweries').select('*')
+      const { data, error } = await supabase.from('breweries').select('*').eq('is_active', true)
       if (error) {
         setError(error.message)
       } else {
