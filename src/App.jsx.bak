@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import Map, { Marker, Popup, GeolocateControl } from 'react-map-gl/mapbox'
+import Map, { Marker, Popup } from 'react-map-gl/mapbox'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
 import Supercluster from 'supercluster'
@@ -29,7 +29,6 @@ function getBreweryTheme(name) {
     'Kereru Brewing': { fill: '#6D4C41', stroke: '#FFF', iconColor: '#FFF' },
     'North End Brewing': { fill: '#C9A66B', stroke: '#FFF', iconColor: '#FFF' },
     "Duncan's Brewing Company": { fill: '#D4AC0D', stroke: '#FFF', iconColor: '#FFF' },
-    'Waitoa': { fill: '#3A3A3A', stroke: '#E8720C', iconColor: '#FFF' },
   }
   return themes[name] || { fill: '#D4720A', stroke: '#FFF', iconColor: '#FFF' }
 }
@@ -39,15 +38,6 @@ function App() {
   const [error, setError] = useState(null)
   const [bounds, setBounds] = useState(null)
   const [zoom, setZoom] = useState(10)
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('mapTheme');
-    if (saved) return saved === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
-
-  useEffect(() => {
-    localStorage.setItem('mapTheme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
   const mapRef = useRef(null)
 
   useEffect(() => {
@@ -106,20 +96,6 @@ function App() {
       <header className="app-header">
         <h1>craftbeer.kiwi</h1>
         <p>Wellington's craft brewery trail</p>
-        <button
-          onClick={() => setDarkMode(d => !d)}
-          aria-label="Toggle dark mode"
-          style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            background: darkMode ? '#333' : '#EEE',
-            color: darkMode ? '#FFF' : '#333',
-          }}
-        >
-          {darkMode ? 'Light' : 'Dark'}
-        </button>
       </header>
 
       {error && <p style={{ color: 'red', padding: '8px' }}>Error: {error}</p>}
@@ -129,11 +105,10 @@ function App() {
         mapboxAccessToken={MAPBOX_TOKEN}
         initialViewState={{ longitude: 174.85, latitude: -41.23, zoom: 10 }}
         style={{ width: '100%', height: '100%' }}
-        mapStyle={darkMode ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11"}
+        mapStyle="mapbox://styles/mapbox/light-v11"
         onLoad={updateBoundsAndZoom}
         onMoveEnd={updateBoundsAndZoom}
       >
-        <GeolocateControl position="top-right" trackUserLocation={true} showUserHeading={true} />
         {clusters.map((feature) => {
           const [longitude, latitude] = feature.geometry.coordinates
           const { cluster: isCluster, point_count: pointCount } = feature.properties
@@ -167,7 +142,6 @@ function App() {
               onClick={(e) => {
                 e.originalEvent.stopPropagation()
                 setSelected(b)
-                mapRef.current.flyTo({ center: [longitude, latitude], zoom: Math.max(zoom, 14), duration: 800 })
               }}
             >
               <div className="brewery-pin">

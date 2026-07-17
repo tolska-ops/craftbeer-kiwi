@@ -1,6 +1,6 @@
 # Architecture Overview
 
-**Last updated:** 11 July 2026
+**Last updated:** 17 July 2026
 
 ## Summary
 
@@ -33,9 +33,14 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 
 - Built with Vite (switched from Create React App early on — faster dev server, simpler config).
 - Single main component (`App.jsx`) currently handles data fetching, map rendering, marker clustering, and popup display. No routing yet — it's a one-page app.
-- Fetches brewery data once on mount via `supabase.from('breweries').select('*')`.
+- Fetches brewery data once on mount via `supabase.from('breweries').select('*').eq('is_active', true)`.
 - Marker clustering: builds a `supercluster` index from brewery coordinates, recalculates visible clusters on map move/zoom, renders either a numbered cluster circle or an individual themed pin depending on zoom level.
-- Per-brewery visual theming: a lookup function (`getBreweryTheme`) maps each brewery name to a colour scheme loosely reflecting its own branding (e.g. Garage Project's purple, Panhead's black-and-orange). Falls back to a default colour for any brewery not explicitly listed.
+- Per-brewery visual theming: a lookup function (`getBreweryTheme`) maps each brewery name to a colour scheme loosely reflecting its own branding (e.g. Garage Project's purple, Panhead's black-and-orange). Falls back to a default colour for any brewery not explicitly listed. As of 17 July, all 18 active breweries have an explicit entry in the `themes` lookup — this is a standing rule going forward: any newly-added brewery (manual or automated) should get an explicit theme entry reflecting its own branding rather than relying on the default fallback.
+- **Light/dark map mode** (added 17 July): a `darkMode` state toggle swaps the Mapbox base style at runtime between `light-v11` and `dark-v11`. Defaults to the visitor's OS-level `prefers-color-scheme` on first load; an explicit user choice (via the header toggle button) is persisted in `localStorage` under the `mapTheme` key and takes priority over the system default on repeat visits. This is a device-level preference, not user account data, so it deliberately isn't stored in Supabase. Brewery pin colours (`getBreweryTheme`) needed no changes to support this — every pin already carries a white (`#FFF`) stroke outline, which keeps all 18 brewery colours legible against both the light and dark base styles without any dark-mode-specific palette.
+- **Fly-to on pin click** (added 17 July): clicking an individual brewery pin now smoothly animates the camera to centre on it (`mapRef.current.flyTo`), reusing the same pattern already used for cluster-expansion zoom. Zoom only increases if the current view is more zoomed-out than 14 (`Math.max(zoom, 14)`), so clicking a pin while already close doesn't yank the view in further than needed.
+- **Geolocate control** (added 17 July): a `GeolocateControl` from `react-map-gl` sits top-right on the map, letting a visitor centre the map on their actual position (prompts for browser location permission). Chosen over purely decorative map features (3D terrain was trialled and reverted the same session — see note below) because it directly serves the "find a brewery near me" use case rather than being visual polish.
+- **Popup close button fix** (added 17 July): Mapbox's default `.mapboxgl-popup-close-button` was effectively invisible at rest against the white popup card (only appeared on hover, which doesn't exist on touch devices — a real usability gap given brewery visitors are likely on mobile). Rebuilt in `App.css` with an explicit 28×28px circular tap target, visible resting-state colour, and a subtle hover background — prioritising touch usability over a purely visual fix.
+- **3D terrain — trialled and reverted (17 July)**: `map.setTerrain()` with a raster-DEM source was built and tested, giving Wellington's hills genuine 3D elevation on tilt/rotate. Reverted after evaluation: it didn't serve the core "find a brewery" wayfinding task, added real mobile rendering cost, and looked more gimmicky than polished even at reduced exaggeration. Noted here so the idea isn't re-investigated from scratch later — the code is fully removed, not just disabled.
 
 ### Backend — Supabase
 
@@ -62,7 +67,7 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 ## Data flow: loading the map
 
 1. Browser loads the app from Vercel's CDN.
-2. React mounts, `useEffect` fires a fetch to Supabase's REST API for all rows in `breweries` where `is_active = true` *(planned — see schema notes)*.
+2. React mounts, `useEffect` fires a fetch to Supabase's REST API for all rows in `breweries` where `is_active = true`.
 3. Supabase checks the request against the `breweries` table's RLS policy, returns matching rows (subject to the publishable key's permissions).
 4. Frontend builds a `supercluster` index from the returned coordinates.
 5. Map renders; clusters/pins recalculated on every pan/zoom based on current viewport bounds.
