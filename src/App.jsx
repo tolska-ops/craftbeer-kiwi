@@ -197,6 +197,7 @@ function App() {
             latitude={selected.latitude}
             onClose={() => setSelected(null)}
             closeOnClick={false}
+            anchor="bottom"
             offset={30}
           >
             <div
