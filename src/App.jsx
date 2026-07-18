@@ -170,7 +170,7 @@ function App() {
               onClick={(e) => {
                 e.originalEvent.stopPropagation()
                 setSelected(b)
-                mapRef.current.flyTo({ center: [longitude, latitude], zoom: Math.max(zoom, 14), duration: 800 })
+                mapRef.current.flyTo({ center: [longitude, latitude], zoom: Math.max(zoom, 14), duration: 800, padding: { top: 120, bottom: 0, left: 0, right: 0 } })
               }}
             >
               <div className="brewery-pin">
@@ -192,6 +192,7 @@ function App() {
 
         {selected && (
           <Popup
+            key={selected.id}
             longitude={selected.longitude}
             latitude={selected.latitude}
             onClose={() => setSelected(null)}
