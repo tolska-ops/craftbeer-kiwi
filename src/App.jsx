@@ -158,7 +158,10 @@ function App() {
           }
 
           const b = feature.properties.brewery
-          const theme = getBreweryTheme(b.name)
+          const isTempClosed = b.status === 'temporarily_closed'
+          const theme = isTempClosed
+            ? { fill: '#9E9E9E', stroke: '#FFF', iconColor: '#FFF' }
+            : getBreweryTheme(b.name)
           return (
             <Marker
               key={b.id}
@@ -200,6 +203,10 @@ function App() {
               style={{ borderTop: `4px solid ${getBreweryTheme(selected.name).fill}` }}
             >
               <h3>{selected.name}</h3>
+              {selected.status === 'temporarily_closed' && (
+                <p className="popup-status-badge">Temporarily Closed</p>
+              )}
+              {selected.status_note && <p className="popup-status-note">{selected.status_note}</p>}
               <p className="popup-address">{selected.address}</p>
               {selected.description && <p className="popup-description">{selected.description}</p>}
               {selected.website && (

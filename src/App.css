@@ -135,3 +135,23 @@ html, body, #root {
   color: #000;
 }
 
+
+.popup-status-badge {
+  display: inline-block;
+  background: #9E9E9E;
+  color: #FFF;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin: 4px 0 8px 0;
+}
+
+.popup-status-note {
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+  margin: 4px 0 8px 0;
+}
