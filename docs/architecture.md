@@ -1,10 +1,10 @@
 # Architecture Overview
 
-**Last updated:** 17 July 2026
+**Last updated:** 20 July 2026
 
 ## Summary
 
-craftbeer.kiwi is a client-rendered React app that fetches brewery data from Supabase and plots it on a Mapbox map. There's no custom backend server — Supabase's auto-generated REST API is the entire "backend," and Vercel hosts the static built frontend.
+craftbeer.kiwi is a client-rendered React app that fetches brewery data from Supabase and plots it on a Mapbox map. There's no custom backend server for the frontend itself — Supabase's auto-generated REST API is the "backend" the app talks to, and Vercel hosts the static built frontend. As of 20 July, a second backend layer exists alongside this: two Supabase Edge Functions that keep the brewery data itself current (see "Automated backend" below) — these run independently of the app, writing to the same Supabase database the frontend reads from.
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
@@ -13,16 +13,16 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 └──────┬───────┘      └──────────────┘      └─────────────┘
        │  fetch breweries (read-only, public)
        ▼
-┌─────────────┐
-│   Supabase   │
-│  (Postgres + │
-│  auto REST   │
-│     API)     │
-└─────────────┘
-
-       │  map tiles / geocoding
-       ▼
-┌─────────────┐
+┌─────────────┐      ┌──────────────────────────┐
+│   Supabase   │◄────►│   Supabase Edge Functions  │
+│  (Postgres + │      │   brewery-sync             │
+│  auto REST   │      │   brewery-discover          │
+│     API)     │      │   (manual-trigger only,      │
+└─────────────┘      │   not yet scheduled)          │
+       │              └──────────┬───────────────────┘
+       │  map tiles / geocoding  │  Google Places API
+       ▼                         ▼
+┌─────────────┐         (external, not shown)
 │   Mapbox     │
 └─────────────┘
 ```
@@ -41,6 +41,8 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 - **Geolocate control** (added 17 July): a `GeolocateControl` from `react-map-gl` sits top-right on the map, letting a visitor centre the map on their actual position (prompts for browser location permission). Chosen over purely decorative map features (3D terrain was trialled and reverted the same session — see note below) because it directly serves the "find a brewery near me" use case rather than being visual polish.
 - **Popup close button fix** (added 17 July): Mapbox's default `.mapboxgl-popup-close-button` was effectively invisible at rest against the white popup card (only appeared on hover, which doesn't exist on touch devices — a real usability gap given brewery visitors are likely on mobile). Rebuilt in `App.css` with an explicit 28×28px circular tap target, visible resting-state colour, and a subtle hover background — prioritising touch usability over a purely visual fix.
 - **3D terrain — trialled and reverted (17 July)**: `map.setTerrain()` with a raster-DEM source was built and tested, giving Wellington's hills genuine 3D elevation on tilt/rotate. Reverted after evaluation: it didn't serve the core "find a brewery" wayfinding task, added real mobile rendering cost, and looked more gimmicky than polished even at reduced exaggeration. Noted here so the idea isn't re-investigated from scratch later — the code is fully removed, not just disabled.
+- **Temporarily-closed brewery status** (added 17 July): two new `breweries` columns — `status` (text, defaults `'active'`, constrained to `'active' | 'temporarily_closed' | 'permanently_closed'`) and `status_note` (free text, optional) — let a brewery be manually marked as temporarily shut (e.g. flood, renovation) without removing it from the map or touching `is_active`. A temporarily-closed brewery renders with a grey pin and shows a "Temporarily Closed" badge plus the status note in its popup. This is a manual-only field — there's no automated signal for *why* a brewery is closed (Places' `business_status` only distinguishes operational/permanently-closed, not temporary situations), confirmed by the real-world case that prompted this feature: Kaikoura's Emporium Brewing was closed for flood repairs with zero mention of it on their own website, showing that even a brewery's own site can't be relied on to self-report a temporary closure. Distinct from `is_active` (permanently gone, filtered off the map entirely) and `flagged_for_review` (automated sources disagree, needs a human look) — this is the third, deliberately human-curated status layer.
+- **Mobile popup fixes** (added 17 July): three issues found during real-device (iPhone) testing were resolved — (1) popups near the top of the map were drifting behind the fixed header bar, fixed by forcing the Mapbox `Popup`'s `anchor="bottom"` so it never flips to render above the pin; (2) tapping between two individual brewery pins wasn't reliably swapping the open popup (cluster-to-cluster taps worked fine, individual-to-individual didn't), fixed by adding an explicit `key={selected.id}` to force React to fully remount the popup on each brewery change rather than reusing a stale DOM node; (3) long brewery names (e.g. "Duncan's Brewing Company") were overlapping the popup's close button, fixed with `padding-right` on the popup title.
 
 ### Backend — Supabase
 
@@ -50,7 +52,17 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
   - `breweries` — public read-only (`select` policy allowing all). No write access from the client.
   - `check_ins` — no policies yet; fully locked down until user auth is built.
 - **API exposure** is also controlled per-table, separately from RLS. Only `breweries` is currently exposed via the Data API; `check_ins` exists in the schema but isn't reachable via the API yet.
-- Two credential tiers: the **publishable key** (safe for frontend use, respects RLS) and the **secret key** (bypasses RLS — never used in frontend code, reserved for future server-side/Edge Function use).
+- Two credential tiers: the **publishable key** (safe for frontend use, respects RLS) and the **secret key** (bypasses RLS — never used in frontend code; used by the two Edge Functions below, which need to write across all rows).
+
+### Automated backend — Supabase Edge Functions (added 20 July)
+
+Two Edge Functions keep the `breweries` table current without manual re-Googling. Full design reasoning, including why they're two separate functions rather than one combined job, lives in `docs/craftbeer-kiwi-automation-plan.md` — this section covers what's actually deployed and running.
+
+- **`brewery-sync`** (closure-check) — ✅ deployed and tested 20 July. For every brewery with a `place_id`, checks Google Places' `businessStatus` field. A `CLOSED_PERMANENTLY` signal sets `flagged_for_review = true` — deliberately not an automatic `is_active` flip, since that only happens once a second independent source (NZBN, not yet integrated) agrees. Tested against all 18 live breweries: `{"checked":18,"flagged":0,"errors":[]}`.
+- **`brewery-discover`** (discovery) — 🔄 deployed 20 July, not yet successfully tested end-to-end. Text-searches Google Places for breweries near Wellington, deduplicates against existing `place_id`s (not name — this correctly handles a brand with multiple physical sites), and inserts genuinely new finds with `flagged_for_review = true` so nothing ships to the live map unreviewed. Manual testing is currently blocked by an unresolved Supabase secret-key validation issue affecting both functions (new-format `sb_secret_...` keys returning `401 INVALID_CREDENTIALS`) — tracked as an open item, not a code problem in either function.
+- **Auth pattern**: both functions use the `withSupabase` wrapper from `@supabase/server` (`auth: 'secret'` mode, `ctx.supabaseAdmin` for RLS-bypassing writes) rather than a manually-constructed `createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)` client. This is Supabase's current recommended pattern for service-to-service Edge Function calls as of mid-2026, superseding the older manual-client approach.
+- Both share the same `GOOGLE_PLACES_API_KEY` Supabase secret — no separate key needed per function.
+- **Not yet scheduled** — both are currently manual-trigger only. `pg_cron` (or Supabase's built-in Edge Function cron) is a later step, once `brewery-discover` has a proven successful test run.
 
 ### Mapping — Mapbox
 
@@ -73,9 +85,11 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 5. Map renders; clusters/pins recalculated on every pan/zoom based on current viewport bounds.
 6. Clicking a pin opens a popup sourced from that brewery's row (name, address, description, website) — no additional network request, data's already local from step 3.
 
+This data flow is entirely separate from — and unaffected by — the Edge Functions above. The app always reads whatever's currently in the `breweries` table; it has no awareness of whether a row got there manually or via `brewery-discover`, or whether `brewery-sync` has run recently.
+
 ## What's not built yet
 
 - **Authentication** — no user accounts exist. `check_ins` table exists in schema but has no policies and isn't exposed via the API.
-- **Any write path from the frontend** — the app is currently fully read-only from the client's perspective. All data changes happen manually via Supabase's SQL Editor or Table Editor.
-- **Automated brewery discovery/closure detection** — planned, not yet built. See `docs/automation-plan.md`. Will introduce a new component (a scheduled Supabase Edge Function) not reflected in the diagram above yet.
-- **Custom domain** — currently live only at the `.vercel.app` URL; `craftbeer.kiwi` DNS not yet pointed at Vercel.
+- **Any write path from the frontend** — the app is currently fully read-only from the client's perspective. All data changes happen via Supabase's SQL Editor/Table Editor, or via the Edge Functions above.
+- **Automated brewery discovery/closure detection — partially built as of 20 July.** `brewery-sync` (closure-check) is deployed and tested; `brewery-discover` (discovery) is deployed but not yet successfully tested; description generation for newly-discovered breweries isn't built at all yet; neither function is on a schedule yet. See `docs/automation-plan.md` for full status.
+- **Custom domain** — currently live only at the `.vercel.app` URL; `craftbeer.kiwi` DNS not yet pointed at Vercel (blocked on a registrar-side portal bug — see automation plan / session notes for details).

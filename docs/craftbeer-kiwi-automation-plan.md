@@ -1,6 +1,6 @@
 # craftbeer.kiwi — Automated Brewery Discovery & Closure Detection
 
-**Written:** 11 July 2026 · **Updated:** 17 July 2026
+**Written:** 11 July 2026 · **Updated:** 20 July 2026 (Edge Function section restructured — split into brewery-sync/brewery-discover; multi-site blind spot section merged in)
 **Purpose:** Pick-up guide for the next session. Covers why this is being built, the architecture, and step-by-step setup — schema changes, Google Cloud, Supabase Edge Functions, and description generation.
 
 ## 13 July update — progress made ahead of schedule, and a design upgrade
@@ -62,7 +62,7 @@ alter table breweries add column flagged_for_review boolean default false;
 - `is_active` — the soft-delete flag. The map/app should filter `where is_active = true` from here on.
 - `last_verified` — timestamp of the last automated check. Useful for spotting rows the automation hasn't successfully checked in a while.
 - `place_id` — Google's own unique ID for each place. Store this for every existing brewery too (requires a one-off lookup per brewery to backfill — see step 4). This is what lets future automated syncs match reliably, instead of trying to match on name/address text (which is fragile — e.g. "Fork & Brewer" vs "Fork and Brewer" vs "FORK & BREWER").
-- `flagged_for_review` — set to `true` when the two verification sources disagree, or a brewery's freshly auto-inserted. Surfaced by the exceptions report (see step 3b) rather than acted on automatically.
+- `flagged_for_review` — set to `true` when the two verification sources disagree, or a brewery's freshly auto-inserted. Surfaced by the exceptions report (see step 3d) rather than acted on automatically.
 
 **Also update `App.jsx`'s Supabase fetch** to filter on `is_active` — ✅ done 13 July:
 ```javascript
@@ -76,8 +76,8 @@ const { data, error } = await supabase.from('breweries').select('*').eq('is_acti
 - ✅ **Places API (New)** enabled (not the legacy "Places API," which can no longer be enabled on new projects)
 - ✅ API key created, named `brewery-sync-places-key`
 - ✅ **API restriction** set — restricted to Places API (New) only
-- ⏳ **Application (IP) restriction — deferred, not yet done.** Currently set to "None" (Google's console does still offer this option on the key's edit page, alongside Websites/IP addresses/Android/iOS — it just isn't offered as an escape option inside the initial "Protect your API key" pop-up dialog, which requires picking a type before you can dismiss it via "Maybe later"). Since Supabase's Edge Function egress IPs aren't known until the function is scaffolded (step 5, below), this is intentionally left open for now. **Follow-up task:** once the Edge Function exists and its egress IP(s) are known, come back to this key in Credentials and switch Application restrictions from "None" to "IP addresses". Until then, the key is protected only by the API restriction (Places API (New) only) — a real but partial safeguard, not a substitute for the IP restriction.
-- Store the key somewhere safe — it'll go into Supabase as a secret (not in `.env.local`, since this key is used server-side in the Edge Function, never exposed to the browser)
+- ⏳ **Application (IP) restriction — deferred, not yet done.** Currently set to "None" (Google's console does still offer this option on the key's edit page, alongside Websites/IP addresses/Android/iOS — it just isn't offered as an escape option inside the initial "Protect your API key" pop-up dialog, which requires picking a type before you can dismiss it via "Maybe later"). Since Supabase's Edge Function egress IPs aren't known until the function is scaffolded (step 5, below), this is intentionally left open for now. **Follow-up task:** once the Edge Functions exist and their egress IP(s) are known, come back to this key in Credentials and switch Application restrictions from "None" to "IP addresses". Until then, the key is protected only by the API restriction (Places API (New) only) — a real but partial safeguard, not a substitute for the IP restriction.
+- Store the key somewhere safe — it'll go into Supabase as a secret (not in `.env.local`, since this key is used server-side in the Edge Functions, never exposed to the browser)
 
 ### 2b. NZBN API setup (second verification source)
 
@@ -85,41 +85,50 @@ const { data, error } = await supabase.from('breweries').select('*').eq('is_acti
 - Store the subscription key alongside the Places key as a Supabase secret
 - Note: matching is by business/trading name, not `place_id` — some breweries' registered legal entity name may differ from their trading name (e.g. "Choice Bros Brewing" vs. whatever name they're actually incorporated under), so this step may need a bit of manual name-mapping for a handful of entries rather than a clean automatic match for all 18. See the Excise CCA List section below for a concrete illustration of how tangled this can get (Panhead/Boneface/Neilson).
 
-### 3. Supabase Edge Function — the core automation — 🔄 scaffolding done 14 July, logic not yet written
+### 3. Supabase Edge Functions — the core automation
 
 Edge Functions run on Supabase's servers, written in TypeScript/Deno (different from the React/Vite code in the main app — new syntax, new environment, but conceptually just "a script that runs on a schedule and does some work").
 
-**Progress so far:**
-- ✅ Supabase CLI installed as a project dev dependency (`npm install supabase --save-dev`, run via `npx supabase ...`)
-- ✅ Logged in (`npx supabase login`)
-- ✅ `supabase/config.toml` initialized (`npx supabase init`)
-- ✅ Linked to the live project (`npx supabase link --project-ref ihcvoqapgcdnoggegrcl`)
-- ✅ Function scaffolded: `supabase functions new brewery-sync` created `supabase/functions/brewery-sync/index.ts` (empty template, no logic yet)
-- ✅ VS Code Deno settings generated (`.vscode/settings.json`) — still need to install the **Deno extension** for VS Code (`denoland.vscode-deno`) for proper import resolution/syntax support in the function file
-- Note: Docker Desktop was **not required** for any of this. The CLI only needs Docker for full local dev/testing (`supabase start`, `supabase functions serve`); deployment falls back to API-based deployment automatically when Docker isn't present. Given the plan is to test via a direct HTTP call to the deployed function rather than a full local stack, Docker can likely be skipped entirely for this project.
+**Design change from this doc's original plan (20 July):** originally scoped as one combined function doing closure-check, discovery, and description generation in a single run. Split into two separate functions instead once it came time to actually build discovery — reasoning: different Places API cost tiers (`businessStatus` is cheap, `websiteUri` sits in a pricier SKU), independent testing/scheduling needs, and not wanting untested new discovery code to risk the already-proven closure-check function.
 
-**What the function needs to do, each time it runs (not yet written):**
+#### 3a. `brewery-sync` — closure-check — ✅ built, deployed, and tested 20 July
 
-1. **Check existing breweries for closures**
-   For every row in `breweries` that has a `place_id`, call the Places API's place details endpoint, read the `businessStatus` field. If it comes back `CLOSED_PERMANENTLY`, set `is_active = false` on that row. Update `last_verified` regardless of outcome.
+For every row in `breweries` that has a `place_id`, call the Places API's place details endpoint, read the `businessStatus` field. If it comes back `CLOSED_PERMANENTLY`, set `flagged_for_review = true` on that row — **not** `is_active = false`. This is a deliberate correction to this doc's original wording: the two-source-agreement rule described in the 13 July update above (Places + NZBN must both agree before auto-closing) applies from day one, not just once NZBN is wired in. Since NZBN isn't integrated yet, a lone Places "closed" signal can only ever flag for review; the auto-close path (flipping `is_active`) will only activate once step 2b (NZBN API) lands. Update `last_verified` regardless of outcome, including on a failed check for an individual brewery (one bad API call shouldn't leave that row's `last_verified` looking falsely fresh, and shouldn't stop the rest of the run).
 
-2. **Discover new breweries**
-   Call the Places API text search (`brewery` as the query, biased to the target region — Wellington first, expand later). For each result:
-   - Check if its `place_id` already exists in the table → skip if so
-   - If new: insert a row with `name`, `address`, `latitude`, `longitude`, `website` (if Places has one), `place_id`, `is_active = true`, `last_verified = now()`
-   - **Website field requirement**: The `website` field must always be checked and populated for every newly-discovered brewery — never left null by default. Places' text search often returns a website URL directly (`websiteUri` in the Places API (New) response); when present, use it. When absent, don't silently skip the field — flag the row for manual follow-up (e.g. via `flagged_for_review`) so it surfaces in the exceptions report rather than quietly shipping with a missing link. This closes a gap first found manually on 17 July, where 7 of the then-18 breweries had a null `website` despite most having a real, findable site — a mistake worth designing out of the automated path from day one rather than accumulating again at scale.
+Tested against all 18 live breweries: `{"checked":18,"flagged":0,"errors":[]}` — expected result, since nothing's actually closed.
 
-3. **Generate a description for newly-inserted breweries**
-   Call the Anthropic API (same pattern as the in-artifact API calls, but from the Edge Function instead) with the brewery's name, address, and any editorial summary Places provides. Prompt it to draft a 1-2 sentence description matching the tone of existing entries. Write the result into the `description` column.
+**Setting this up practically:**
+- Install the Supabase CLI locally — ✅ done 14 July, as an npm dev dependency (not global — invoke via `npx supabase ...` in PowerShell, not a bare `supabase` command)
+- Scaffold the function (`supabase functions new brewery-sync`) — ✅ done 14 July
+- Write the function logic — ✅ done 20 July
+- **Note on pattern used:** by 20 July, Supabase's own default template had moved on from the plan's original assumption of a manually-created `createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)` client inside a raw `Deno.serve`. The function instead uses the newer `withSupabase` wrapper from `@supabase/server` (`import { withSupabase } from "npm:@supabase/server"`), exporting `default { fetch: withSupabase({ auth: 'secret' }, handler) }`. `auth: 'secret'` suits this function since it's triggered by a schedule or a manual call, not a signed-in user — `ctx.supabaseAdmin` gives the RLS-bypassing client needed to write across all rows. This requires `verify_jwt = false` in `supabase/config.toml` for this function (already present from the 14 July scaffold, no edit needed). Same pattern applies to `brewery-discover` below.
+- Set the Google Places API key as a Supabase secret — ✅ done 20 July, via the Dashboard (Settings → Edge Functions → Secrets), named `GOOGLE_PLACES_API_KEY`. Shared by both functions — no separate key needed for `brewery-discover`.
+- Deploy the function — ✅ done 20 July, via `npx supabase functions deploy brewery-sync --project-ref ihcvoqapgcdnoggegrcl`
+- Test it manually first — ✅ done 20 July. New-format secret keys (`sb_secret_...`) aren't JWTs and must go on the `apikey` header, not `Authorization: Bearer` — a gotcha worth remembering for any future manual test calls.
+- Once egress IPs are known post-deploy, circle back to the Google Cloud key (see step 2) and add the IP application restriction — still outstanding.
 
-**Remaining for next session:**
-- Write the function logic (this is the bulk of the actual coding work)
-- Set the Google Places API key and Anthropic API key as Supabase secrets (`npx supabase secrets set GOOGLE_PLACES_API_KEY=...`), not hardcoded
-- Deploy the function (`npx supabase functions deploy brewery-sync`)
-- Test it manually first (trigger it via a direct HTTP call) before scheduling it
-- Once egress IPs are known post-deploy, circle back to the Google Cloud key (see step 2) and add the IP application restriction
+#### 3b. `brewery-discover` — discovery — 🔄 built and deployed 20 July, not yet successfully tested
 
-### 3b. Exceptions report — a single place to see what needs a human look
+Text-searches Google Places for `"brewery in Wellington, New Zealand"`, biased (not restricted) to a 50km circle around Wellington CBD — wide enough to catch outlying breweries like Kapiti Coast without excluding results further out. For each result:
+- Skip if `place_id` already exists in the table (dedup is by `place_id`, not name — this correctly handles multi-site brands like Garage Project, unlike name-based matching, which is what missed Wild Workshop when checked manually on 17 July; see "Known blind spot — multi-site brands" below)
+- If new: insert a row with `name`, `address`, `latitude`, `longitude`, `website` (from Places' `websiteUri` if available, else null), `place_id`, `is_active = true`, `last_verified = now()`, **and `flagged_for_review = true`** — this last field is a necessary correction to this doc's original step-2 sketch: without it, a fresh auto-insert wouldn't actually surface in the exceptions report (3d below), since `last_verified = now()` on insert means the staleness clause wouldn't catch it either.
+
+`description` is deliberately left null on insert — that's the not-yet-built description-generation step (3c below).
+
+**Website field requirement** (carried over from the 17 July update below): the `website` field must always be checked and populated for every newly-discovered brewery — never left null by default. When Places' `websiteUri` is present, it's used directly. When absent, the row still gets inserted (with `website` null) but `flagged_for_review = true` already ensures it surfaces for a manual follow-up rather than quietly shipping with a missing link — this closes the same gap first found manually on 17 July, where 7 of the then-18 breweries had a null `website` despite most having a real, findable site.
+
+**Setting this up practically:**
+- Scaffold the function (`supabase functions new brewery-discover`) — ✅ done 20 July
+- Write the function logic — ✅ done 20 July
+- Deploy the function — ✅ done 20 July, via `npx supabase functions deploy brewery-discover --project-ref ihcvoqapgcdnoggegrcl`
+- Test it manually — ❌ blocked as of 20 July by an unresolved Supabase secret-key validation issue affecting both functions (new `sb_secret_...` keys consistently return `401 INVALID_CREDENTIALS` against both `brewery-sync` and `brewery-discover` — a project-level issue, not specific to either function's code). No end-to-end confirmation yet that discovery correctly finds/dedupes/inserts breweries.
+- **`dryRun` safety flag** — discussed as worth adding before the first real (non-401) test run, since this function writes directly to the live `breweries` table. Not yet implemented. Given it writes to production data on an untested code path, strongly worth adding before trusting the first real run, even with `flagged_for_review = true` as a backstop.
+
+#### 3c. Description generation — not yet built
+
+Originally scoped as "step 3" of the combined function: call the Anthropic API with a newly-discovered brewery's name, address, and any editorial summary Places provides, and write a 1-2 sentence description matching the tone of existing entries. Now likely belongs inside `brewery-discover` (only relevant to freshly-inserted rows) once that function's core discovery logic is proven working — not yet decided for certain.
+
+### 3d. Exceptions report — a single place to see what needs a human look
 
 Rather than a `flagged_for_review` value sitting quietly in the table, give it a proper, glanceable output. After each automated run, one query surfaces everything worth a look:
 
@@ -140,29 +149,25 @@ Keep this as a saved SQL query in Supabase's SQL Editor for now (Supabase suppor
 
 ### 4. Backfill `place_id` for the existing breweries — ✅ done 13 July
 
-Before the sync function is useful, the existing rows need their `place_id` filled in — otherwise the closure-check step (1, above) has nothing to check them against, and the discovery step (2, above) might re-insert them as "new" duplicates.
+Before the sync function is useful, the existing rows need their `place_id` filled in — otherwise the closure-check step (3a, above) has nothing to check them against, and the discovery step (3b, above) might re-insert them as "new" duplicates.
 
 This is a one-off task: for each brewery, look up its Places `place_id` (can be done via the Places API text search once, matching by name/address) and update the row. Small, bounded piece of work — worth doing as step zero before the automation goes live.
 
-### 5. Schedule the function
+### 5. Schedule the functions
 
-Once tested manually and working, use Supabase's scheduled triggers (`pg_cron` extension, or Supabase's built-in cron for Edge Functions) to run it on a cadence — weekly is a reasonable starting point, adjustable later.
+Once each is tested manually and working, use Supabase's scheduled triggers (`pg_cron` extension, or Supabase's built-in cron for Edge Functions) to run them on a cadence — weekly is a reasonable starting point for each, adjustable later. `brewery-sync` and `brewery-discover` don't need to run on the same schedule — they're independent now.
 
 ---
 
-## Suggested order for next session
+## Known blind spot — multi-site brands (found 17 July, via Garage Project Wild Workshop)
 
-1. ~~Run the schema changes~~ — ✅ done
-2. ~~Update `App.jsx` to filter on `is_active`~~ — ✅ done
-3. ~~Set up Google Cloud billing + Places API key~~ — ✅ done (IP application restriction deferred to step 5, see step 2 above)
-4. ~~Backfill `place_id` for the existing breweries~~ — ✅ done
-5. ~~Install Supabase CLI, scaffold the Edge Function~~ — ✅ done 14 July (CLI installed, logged in, linked to project `ihcvoqapgcdnoggegrcl`, `brewery-sync` function scaffolded)
-6. **Write and test the closure-check logic first** (simpler, lower-risk than discovery) ← next unstarted step
-7. Add the discovery logic (remember the website-field requirement above)
-8. Add the Anthropic description-generation step
-9. Deploy, test manually, then schedule
+Discovery-by-name approaches (Places text search, excise CCA list, Brewers Guild list) all key on business name. A brand with **more than one physical site under the same name** looks like a duplicate to that kind of matching, not a new entry — so a second (or third) venue can be silently skipped even when the core system is working correctly.
 
-This is realistically **2-4 sessions** of work at your usual pace, not a single sitting — steps 5 onward involve three tools you haven't used yet (Supabase CLI, Edge Functions/Deno, Google Cloud Console), so budget time for some friction and troubleshooting along the way, same as the Mapbox setup snag earlier in the project.
+This surfaced concretely with Garage Project: it turned out to have a fourth central-Wellington site, **Wild Workshop** (7 Furness Lane, Te Aro — a barrel-ageing/mixed-fermentation taproom and cellar door, distinct from both the Aro Street original and Leeds Street), that hadn't made it into the directory despite Garage Project's other two sites being present. Garage Project's own website contact page doesn't list it either — it shows a single head-office address, so even a manual check against the "official" source wouldn't have caught it.
+
+The source that did catch it: a **regional tourism board page** (wellingtonnz.com's Garage Project write-up), which described all three central Wellington locations together, written for visitors rather than for data-matching purposes.
+
+**Implication for the automation design**: `brewery-discover`'s dedup logic is by `place_id`, not name, which is the correct defence against this specific trap — a second site under the same brand gets its own `place_id` and won't be silently skipped. The remaining gap is different: Text Search may simply not *surface* every site of a multi-venue brand in its results at all, regardless of how dedup is implemented, since that depends on Places' own ranking and search radius rather than anything in this codebase. Once the core Places/NZBN two-source system is proven, worth adding a periodic manual (or semi-automated) cross-check against regional tourism sites for any brand already in the directory that's grown past a single site — same "not a live API, occasional manual check" category as Beervana and the Brewers Guild annual report below. Not a blocker for the initial build, but a known gap in the design's discovery coverage that shouldn't be assumed solved by Places/NZBN alone.
 
 ---
 
@@ -185,11 +190,12 @@ Cross-checked against all 18 current breweries: **18 confirmed**, matching name,
 
 ## Manual cross-checks (not automated — a once- or twice-a-year habit, not a pipeline step)
 
-These sources don't have APIs and aren't part of the scheduled Edge Function. Worth a quick manual glance on roughly this cadence:
+These sources don't have APIs and aren't part of the scheduled Edge Functions. Worth a quick manual glance on roughly this cadence:
 
 - **Brewers Guild annual report** — published each year (usually mid-year, after the AGM). When the new one drops, spot-check its member list against your directory: anything newly listed that you're missing, anything you have that's dropped off. Also a good moment to reconsider Martinborough Brewery (Wairarapa) if scope ever expands past Wellington/Hutt/Kāpiti.
 - **Beervana exhibitor list** — refreshes each year ahead of the August festival. Worth a glance for the "New Kids On The Block" stand specifically (new breweries from the past 12 months) and as a "still trading" spot-check for anything the automated system flagged as uncertain.
 - **NZ Customs Excise CCA List** — republished periodically at customs.govt.nz. Worth pulling a fresh copy every 6-12 months and diffing against the last saved snapshot in `docs/sources/` to catch address changes, ownership changes, or new licences.
+- **Regional tourism board pages** (e.g. wellingtonnz.com) — added 20 July, per the multi-site blind spot above. Worth a glance for any brand already in the directory, to catch additional venues that name/place_id-based automated discovery might not surface.
 
 Neither of these needs a calendar reminder or anything formal — just worth doing whenever you happen to be in the app doing other work around those times of year.
 
@@ -206,10 +212,25 @@ Not part of the first build because it's a bulk file (updated quarterly — Feb/
 - **Region scope**: start with Wellington-only automation (matches current data), or build for national from the start since the code doesn't really care? (Recommend: keep Wellington-scoped for now, it's simpler to verify correctness, expand the search query's geographic bounds later once trusted.)
 - **National expansion, when it happens**: use the manual cross-checks listed above (Brewers Guild annual report, Brewers Association national list, NZ Ale Trail, Beervana) as the *starting checklist* — pull names from each, cross-verify every one against Places/NZBN before adding, same standard applied to today's 18 Wellington breweries. Don't skip verification just because a name appears on an "official-looking" list — the Brewers Association's list turned out to be a decade stale, so treat every source as a lead to check, not a fact to trust.
 - **Schedule frequency**: weekly is a reasonable default, but worth deciding based on how "urgent" catching a closure feels vs. API cost.
-- **Manual override**: should there be a simple way to force `is_active = false` on a brewery manually (e.g. if you hear about a closure before automation catches it)? Worth a tiny admin tool or just doing it via Supabase's Table Editor directly — the latter is fine for now, no need to build UI for this yet.
+- **Manual override**: should there be a simple way to force `is_active = false` on a brewery manually (e.g. if you hear about a closure before automation catches it)? Partially answered by the `status`/`status_note` fields shipped 17 July — see `architecture.md` — which cover *temporary* closures via Supabase's Table Editor. Still open: whether a similar quick manual path is worth building for *permanent* closures too, or whether editing `is_active` directly via Table Editor remains fine for that rarer case.
+- **Supabase secret-key issue** — new `sb_secret_...` keys returning `401 INVALID_CREDENTIALS` against both deployed functions as of 20 July. Needs the GitHub API-keys migration thread read and/or a Supabase support ticket filed before either function can be manually tested/trusted further.
 
 ## 17 July update — website field audit and process fix
 
 All 18 active breweries had their `website` field audited via a direct SQL pull (`select name, website from breweries where is_active = true order by name;`). 7 rows were null (Duncan's Brewing Company, Abandoned Brewery, Baylands Brewery, Kereru Brewing, North End Brewing, Te Aro Brewing Company) — all had real, verifiable websites that simply hadn't been captured when the rows were added manually. All 7 corrected via SQL update, cross-referenced against live web search before writing. All 18 rows now have a populated `website` field.
 
-This was a manual data-hygiene pass, not an automated one, but it directly informed the **website field requirement** added to the discovery-logic notes under step 3 above — the same gap would otherwise resurface automatically once the Edge Function starts inserting new rows unsupervised.
+This was a manual data-hygiene pass, not an automated one, but it directly informed the **website field requirement** added to the discovery-logic notes under step 3b above — the same gap would otherwise resurface automatically once the Edge Function starts inserting new rows unsupervised.
+
+## Suggested order for next session
+
+1. ~~Run the schema changes~~ — ✅ done
+2. ~~Update `App.jsx` to filter on `is_active`~~ — ✅ done
+3. ~~Set up Google Cloud billing + Places API key~~ — ✅ done (IP application restriction still deferred, see step 2 above)
+4. ~~Backfill `place_id` for the existing breweries~~ — ✅ done
+5. ~~Install Supabase CLI, scaffold the Edge Function(s)~~ — ✅ done (both `brewery-sync` and `brewery-discover` now scaffolded)
+6. ~~Write, deploy, and test the closure-check logic (`brewery-sync`)~~ — ✅ done 20 July
+7. Write and deploy the discovery logic — ✅ built and deployed 20 July as a separate function, `brewery-discover`. ⚠️ Not yet manually tested — blocked by the unresolved Supabase secret-key issue above. ← pick this back up first, once that's resolved
+8. Add the Anthropic description-generation step (3c above) — not yet started
+9. Schedule both functions on a cadence (`pg_cron` or Supabase's built-in cron) once each is proven working
+
+This is realistically **2-4 sessions** of work at your usual pace, not a single sitting — the remaining steps involve tooling/debugging friction that's already shown up more than once (the Supabase secret-key issue being the current example), so budget time for troubleshooting along the way.
