@@ -207,14 +207,19 @@ const theme = THEMES[themeId];
     anchor="center"
   >
     <div className="user-location-marker" title="Your location">
-  <svg width="32" height="32" viewBox="0 0 32 32">
+ <svg width="48" height="48" viewBox="0 0 32 32">
   <circle cx="16" cy="16" r="14" fill="#2E86DE" stroke="#FFF" strokeWidth="2" />
-  <line x1="16" y1="5" x2="16" y2="8" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" />
-  <path
-    d="M16 8 C19.5 8 22.5 10 22.5 13 C22.5 14.8 21 16 19 16.3 C21.3 16.6 22.5 18.3 22 20 C21.5 21.7 19.5 22.3 18 22.2 C19.5 23 19.3 25 18 26 C17.2 26.7 16.5 27.2 16 27.7 C15.5 27.2 14.8 26.7 14 26 C12.7 25 12.5 23 14 22.2 C12.5 22.3 10.5 21.7 10 20 C9.5 18.3 10.7 16.6 13 16.3 C11 16 9.5 14.8 9.5 13 C9.5 10 12.5 8 16 8 Z"
-    fill="#FFF"
-  />
-</svg>
+     <g transform="translate(9,7) scale(1)">
+      <path d="m 7.602,9.751 c -2.445,1.946 -2.357,3.765 0,5.469 2.357,-1.704 2.446,-3.523 0,-5.469 z" fill="#000" stroke="#FFF" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m 7.578,7.666 c -0.838,3.338 0.423,4.616 3.148,5.322 0.846,-2.847 0.021,-4.533 -3.148,-5.322 z" fill="#000" stroke="#FFF" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m 7.626,7.666 c 0.838,3.338 -0.423,4.616 -3.148,5.322 -0.846,-2.847 -0.021,-4.533 3.148,-5.322 z" fill="#000" stroke="#FFF" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m 7.602,7.666 c -2.445,1.867 -2.357,3.612 0,5.247 2.357,-1.635 2.446,-3.38 0,-5.247 z" fill="#000" stroke="#FFF" strokeWidth="0.8" strokeLinejoin="round" />
+      <path d="m 8.04,5.97 c -0.463,3.38 0.924,4.523 3.695,4.963 0.525,-2.897 -0.475,-4.486 -3.695,-4.963 z" fill="#000" stroke="#FFF" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m 7.164,5.97 c 0.464,3.38 -0.924,4.523 -3.695,4.963 -0.525,-2.897 0.475,-4.486 3.695,-4.963 z" fill="#000" stroke="#FFF" strokeWidth="0.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m 2.773,8.219 c 0.055,-3.079 2.301,-4.857 4.829,-4.874 2.528,-0.017 4.775,1.795 4.829,4.874 -1.276,0.018 -2.312,-0.146 -3.094,-0.627 -0.187,0.847 -0.772,1.672 -1.735,2.474 -0.963,-0.802 -1.548,-1.627 -1.735,-2.474 -0.782,0.481 -1.818,0.645 -3.094,0.627 z" fill="#040404" stroke="#FFF" strokeWidth="0.8" strokeLinejoin="round" strokeLinecap="round" />
+      <path d="m 7.602,3.954 v -1.323" fill="none" stroke="#000" strokeWidth="0.8" strokeLinecap="round" />
+    </g>
+ </svg>
     </div>
   </Marker>)}
         {clusters.map((feature) => {
