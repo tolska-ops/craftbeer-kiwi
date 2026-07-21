@@ -33,22 +33,85 @@ function getBreweryTheme(name) {
   }
   return themes[name] || { fill: '#D4720A', stroke: '#FFF', iconColor: '#FFF' }
 }
+// Visual themes - each bundles the map style plus UI colours that
+// change together. Add new themes here; nothing else in the app
+// needs to know they exist once wired up below.
+const THEMES = {
+  light: {
+    id: 'light',
+    label: 'Light',
+    mapStyle: 'mapbox://styles/mapbox/light-v11',
+    accent: '#D4720A',
+    headerBg: 'rgba(20, 20, 20, 0.85)',
+    headerText: '#FFF',
+  },
+  dark: {
+    id: 'dark',
+    label: 'Dark',
+    mapStyle: 'mapbox://styles/mapbox/dark-v11',
+    accent: '#D4720A',
+    headerBg: 'rgba(20, 20, 20, 0.85)',
+    headerText: '#FFF',
+  },
+  diveBar: {
+    id: 'diveBar',
+    label: 'Dive Bar',
+    mapStyle: 'mapbox://styles/PLACEHOLDER/decimal-style-id', // TODO: real Decimal URL
+    accent: '#8B4513',
+    headerBg: 'rgba(10, 10, 10, 0.92)',
+    headerText: '#E8D5B7',
+  },
+  hopExplosion: {
+    id: 'hopExplosion',
+    label: 'Hop Explosion',
+    mapStyle: 'mapbox://styles/PLACEHOLDER/finland-topo-style-id', // TODO: real Finland Topo URL
+    accent: '#7CB342',
+    headerBg: 'rgba(255, 152, 0, 0.9)',
+    headerText: '#1A1A1A',
+  },
+};
 function App() {
   const [breweries, setBreweries] = useState([])
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState(null)
   const [bounds, setBounds] = useState(null)
   const [zoom, setZoom] = useState(10)
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('mapTheme');
-    if (saved) return saved === 'dark';
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
+  const [userLocation, setUserLocation] = useState(null);
+ const [themeId, setThemeId] = useState(() => {
+  const saved = localStorage.getItem('mapTheme');
+  if (saved && THEMES[saved]) return saved;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+});
 
-  useEffect(() => {
-    localStorage.setItem('mapTheme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+useEffect(() => {
+  localStorage.setItem('mapTheme', themeId);
+}, [themeId]);
+
+const theme = THEMES[themeId];
+
+
   const mapRef = useRef(null)
+  useEffect(() => {
+  const wellingtonCBD = { longitude: 174.7762, latitude: -41.2865 };
+
+  if (!navigator.geolocation) {
+    setUserLocation(wellingtonCBD);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      setUserLocation({
+        longitude: position.coords.longitude,
+        latitude: position.coords.latitude,
+      });
+    },
+    () => {
+      setUserLocation(wellingtonCBD);
+    },
+    { enableHighAccuracy: false, timeout: 8000 }
+  );
+}, []);
 
   useEffect(() => {
     async function fetchBreweries() {
@@ -103,25 +166,28 @@ function App() {
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <h1>craftbeer.kiwi</h1>
-        <p>Wellington's craft brewery trail</p>
-        <button
-          onClick={() => setDarkMode(d => !d)}
-          aria-label="Toggle dark mode"
-          style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            background: darkMode ? '#333' : '#EEE',
-            color: darkMode ? '#FFF' : '#333',
-          }}
-        >
-          {darkMode ? 'Light' : 'Dark'}
-        </button>
-      </header>
-
+   <header className="app-header" style={{ background: theme.headerBg, color: theme.headerText }}>
+  <h1>craftbeer.kiwi</h1>
+  <p>Wellington's craft brewery trail</p>
+  <select
+    value={themeId}
+    onChange={(e) => setThemeId(e.target.value)}
+    aria-label="Choose map theme"
+    style={{
+      padding: '8px 12px',
+      borderRadius: '6px',
+      border: 'none',
+      cursor: 'pointer',
+      background: theme.accent,
+      color: '#FFF',
+      fontWeight: 600,
+    }}
+  >
+    {Object.values(THEMES).map((t) => (
+      <option key={t.id} value={t.id}>{t.label}</option>
+    ))}
+  </select>
+</header>
       {error && <p style={{ color: 'red', padding: '8px' }}>Error: {error}</p>}
 
       <Map
@@ -129,11 +195,28 @@ function App() {
         mapboxAccessToken={MAPBOX_TOKEN}
         initialViewState={{ longitude: 174.85, latitude: -41.23, zoom: 10 }}
         style={{ width: '100%', height: '100%' }}
-        mapStyle={darkMode ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11"}
+        mapStyle={theme.mapStyle}
         onLoad={updateBoundsAndZoom}
         onMoveEnd={updateBoundsAndZoom}
       >
         <GeolocateControl position="top-right" trackUserLocation={true} showUserHeading={true} />
+        {userLocation && (
+  <Marker
+    longitude={userLocation.longitude}
+    latitude={userLocation.latitude}
+    anchor="center"
+  >
+    <div className="user-location-marker" title="Your location">
+  <svg width="32" height="32" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="14" fill="#2E86DE" stroke="#FFF" strokeWidth="2" />
+  <line x1="16" y1="5" x2="16" y2="8" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" />
+  <path
+    d="M16 8 C19.5 8 22.5 10 22.5 13 C22.5 14.8 21 16 19 16.3 C21.3 16.6 22.5 18.3 22 20 C21.5 21.7 19.5 22.3 18 22.2 C19.5 23 19.3 25 18 26 C17.2 26.7 16.5 27.2 16 27.7 C15.5 27.2 14.8 26.7 14 26 C12.7 25 12.5 23 14 22.2 C12.5 22.3 10.5 21.7 10 20 C9.5 18.3 10.7 16.6 13 16.3 C11 16 9.5 14.8 9.5 13 C9.5 10 12.5 8 16 8 Z"
+    fill="#FFF"
+  />
+</svg>
+    </div>
+  </Marker>)}
         {clusters.map((feature) => {
           const [longitude, latitude] = feature.geometry.coordinates
           const { cluster: isCluster, point_count: pointCount } = feature.properties
@@ -159,7 +242,7 @@ function App() {
 
           const b = feature.properties.brewery
           const isTempClosed = b.status === 'temporarily_closed'
-          const theme = isTempClosed
+          const pinTheme = isTempClosed
             ? { fill: '#9E9E9E', stroke: '#FFF', iconColor: '#FFF' }
             : getBreweryTheme(b.name)
           return (
@@ -177,11 +260,11 @@ function App() {
                 <svg viewBox="0 0 24 24" width="32" height="32">
                   <path
                     d="M12 0C7 0 3 4 3 9c0 6.5 9 15 9 15s9-8.5 9-15c0-5-4-9-9-9z"
-                    fill={theme.fill}
-                    stroke={theme.stroke}
+                    fill={pinTheme.fill}
+                    stroke={pinTheme.stroke}
                     strokeWidth="1.5"
                   />
-                  <text x="12" y="12" fontSize="10" textAnchor="middle" fill={theme.iconColor}>
+                  <text x="12" y="12" fontSize="10" textAnchor="middle" fill={pinTheme.iconColor}>
                     🍺
                   </text>
                 </svg>
