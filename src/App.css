@@ -159,3 +159,12 @@ html, body, #root {
 .popup-content h3 {
   padding-right: 28px;
 }
+.user-location-marker {
+  border-radius: 50%;
+  animation: user-location-pulse 2s ease-in-out infinite;
+}
+
+@keyframes user-location-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 134, 222, 0.5); }
+  50% { box-shadow: 0 0 0 10px rgba(46, 134, 222, 0); }
+}
