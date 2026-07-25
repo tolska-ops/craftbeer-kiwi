@@ -6,6 +6,18 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ---
 
+## Theming: `themeId` + `THEMES` registry, not a `darkMode` boolean
+
+**Decided:** Replace the earlier `darkMode` boolean toggle with a `themeId` string and a `THEMES` registry object. Each theme entry bundles a Mapbox `mapStyle` URL, an `accent` colour, and header `headerBg`/`headerText` colours in one place; a `<select>` dropdown in the header replaces the old toggle button.
+
+**Why:** A boolean only ever supports two states. The product direction called for more than light/dark (Dive Bar and Hop Explosion were already planned), so a registry keyed by `themeId` scales to any number of themes without new branching logic each time one's added — swapping themes becomes "add an entry to `THEMES`," not "add another special case."
+
+**Status:** Light and Dark are fully implemented with real Mapbox style URLs. Dive Bar and Hop Explosion are structurally wired up (selectable, switch state correctly) but still point at placeholder style URLs — see the automation/theme to-do in `todo.md` for the two candidate paths (Mapbox Standard presets vs. fully custom Studio styles).
+
+**Ruled out:** Keeping the boolean and adding more special-cased toggle states — rejected as it wouldn't scale past a third theme without increasingly awkward conditional logic.
+
+---
+
 ## Domain: no nameserver switch to Vercel
 
 **Decided:** Point `craftbeer.kiwi` at Vercel via an A record at host `@`, not by switching nameservers to Vercel.

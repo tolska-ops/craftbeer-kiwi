@@ -1,6 +1,6 @@
 # craftbeer.kiwi - To-Do List
 
-**Last updated:** 21 July 2026
+**Last updated:** 25 July 2026
 **Purpose:** Single source of truth for what's outstanding on the project, so this doesn't only live in session memory. Update this whenever something here gets done, or something new gets added - same standing-instruction treatment as the other living docs (architecture.md, craftbeer-kiwi-automation-plan.md, retrospective.md).
 
 Status key: 🔴 Blocked · 🟡 In progress / recommended, not started · ⚪ Not started · ✅ Done (kept briefly for context, remove once stale)
@@ -20,18 +20,18 @@ Status key: 🔴 Blocked · 🟡 In progress / recommended, not started · ⚪ N
 
 ## Not started
 
-- ⚪ **Instrument basic usage tracking.** No analytics or check-in counts exist yet on craftbeer-kiwi.vercel.app - flagged 24 July as a gap: there's no signal on whether the core loop (browse map, check in) is actually being used, despite ongoing UX/visual polish work. Even a crude pageview/check-in count would help prioritise better than more theming work.
-- ⚪ **Deprioritise further discovery-pipeline automation until manual volume justifies it.** Flagged 24 July: `brewery-discover` targets a directory of 18 breweries - automating discovery only pays off once new breweries are being found faster than they can be added by hand. Manually adding entries (e.g. Garage Project Wild Workshop) is currently more valuable than pipeline work. Revisit once brewery count/discovery rate makes automation worth it.
-- ⚪ **Distribution plan once domain is live.** Flagged 24 July: getting craftbeer.kiwi pointed at Vercel is necessary but not sufficient - there's currently no plan for how Wellington beer drinkers would find the site. Worth a simple plan (e.g. share with a handful of real Wellington beer people) once the domain is unblocked, rather than only continuing feature/polish work.
 - ⚪ **2FA on GitHub, Supabase, and Vercel accounts.** Flagged repeatedly across multiple sessions without being actioned - genuinely small task, worth just doing.
 - ⚪ **Add Garage Project Wild Workshop as brewery entry #19.** 7 Furness Lane, Te Aro, Wellington 6011; website garageproject.co.nz. Distinct barrel-ageing/mixed-fermentation taproom, separate from the existing Aro Street and Leeds Street Garage Project sites. Still need: `place_id` and lat/long before inserting. Draft SQL prepared in an earlier session.
-- ⚪ **NZBN API integration.** Second verification source for the closure-check logic - once wired in, `brewery-sync` can upgrade from single-source `flagged_for_review` writes to real two-source auto-close, per the automation plan's original design.
+- ⚪ **NZBN API integration.** Second verification source for the closure-check logic - once wired in, `brewery-sync` can upgrade from single-source `flagged_for_review` writes to real two-source auto-close, per the automation plan's original design. Note the 25 July reflection below on whether this is worth prioritising yet.
 - ⚪ **Anthropic API description-generation step.** Auto-draft a 1-2 sentence description for newly-discovered breweries. Likely lands inside `brewery-discover` once its core discovery logic is proven working, but not decided for certain.
 - ⚪ **Schedule the Edge Functions** (`pg_cron` or Supabase's built-in cron) - once each has a proven successful manual test run. Currently both are manual-trigger only.
 - ⚪ **Favourites / brewery trail persistence without user accounts.** Design discussed 21 July: browser-generated `crypto.randomUUID()` in `localStorage`, a `trails` table keyed to that ID, a scheduled Edge Function deleting rows older than 7 days, and a separate public share-code (not the private device ID) for sharing a trail. Nothing built yet.
 - ⚪ **Name search feature.** Client-side filtering of the in-memory breweries array by name (possibly address), applied before the supercluster index so results recluster correctly. Likely extracted as its own `SearchBar.jsx` component given `App.jsx`'s existing size. Region/suburb filter chips and geocoding/address search both explicitly deferred until there's a reason for them.
 - ⚪ **Google Cloud API key IP restriction.** Currently the Places API key has no application (IP) restriction - deferred until the Edge Functions' egress IPs are known, since that's needed to set it correctly.
 - ⚪ **Multi-country domain/branding strategy.** Deliberately parked - revisit only once Wellington is proven and national NZ coverage is actively underway, well before any Australia expansion is real.
+- ⚪ **Basic usage instrumentation.** Raised 25 July during a startup-lessons reflection session: there's currently no analytics or usage tracking on craftbeer-kiwi.vercel.app at all - no visibility into whether the core loop (browse map, check in) is actually being used. Even a crude pageview/check-in count would give more signal than another round of visual polish. Not started.
+- ⚪ **Distribution plan.** Also raised 25 July: the domain isn't pointed at Vercel yet, and there's no plan for how Wellington beer drinkers would actually find the site. Flagged as possibly mattering more right now than the next feature - worth deciding on at least a first, low-effort step (e.g. get the domain live and tell a handful of actual Wellington beer people about it).
+- ⚪ **Reconsider timing of further discovery/closure automation investment.** Also raised 25 July: `brewery-sync`/`brewery-discover` were built for a directory of 18 breweries - automating discovery only pays off once new breweries are being added faster than by hand, which isn't the case yet. Not a reason to abandon what's built, but worth being deliberate about whether the next session's effort goes into more automation vs. instrumentation/distribution/manually adding brewery #19. Andy has asked for a lighter touch on repeating this observation going forward - flag only if genuinely new, not as a recurring nudge.
 
 ---
 
@@ -44,3 +44,4 @@ Status key: 🔴 Blocked · 🟡 In progress / recommended, not started · ⚪ N
 - ✅ Theme-switching system built and shipped, replacing the old dark-mode toggle (21 July).
 - ✅ Custom user-location marker with Andy's own hop-cone artwork, shipped 21 July.
 - ✅ Map-not-filling-browser bug found and fixed (leftover `#root` width cap from the original template) - 21 July.
+- ✅ `concept-cron.md` and `concepts-index.md` created, starting a "concept snapshot" reference series kept in this project (25 July).
