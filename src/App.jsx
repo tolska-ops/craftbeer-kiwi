@@ -14,6 +14,7 @@ function getBreweryTheme(name) {
   const themes = {
     'Garage Project': { fill: '#A0338F', stroke: '#FFF', iconColor: '#FFF' },
     'Garage Project Leeds Street': { fill: '#C64FB0', stroke: '#FFF', iconColor: '#FFF' },
+    'Garage Project Wild Workshop': { fill: '#6E1F5E', stroke: '#FFF', iconColor: '#FFF' },
     'Panhead Custom Ales': { fill: '#1A1A1A', stroke: '#D4720A', iconColor: '#D4720A' },
     'Fork & Brewer': { fill: '#1B4F72', stroke: '#FFF', iconColor: '#FFF' },
     'Heyday Beer Co': { fill: '#4CAF7D', stroke: '#FFF', iconColor: '#FFF' },
