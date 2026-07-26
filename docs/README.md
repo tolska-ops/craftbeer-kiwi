@@ -10,7 +10,7 @@ An interactive directory and map of Wellington-region craft breweries, with plan
 
 craftbeer.kiwi is a personal side project — a functional brewery directory app and a hands-on way of learning the modern web stack (React, Supabase, Mapbox, Vercel) at the same time. Inspiration comes from established brewery-trail concepts overseas (e.g. the South Shore and Idaho Brewery Trails).
 
-Current state: a live, deployed map showing 17 verified Wellington-region breweries, each with a custom-themed pin, marker clustering for dense areas (e.g. Upper Hutt's Brewtown, which hosts four separate breweries at one address), and a styled popup with brewery details.
+Current state: a live, deployed map showing 19 verified Wellington-region breweries, each with a custom-themed pin, marker clustering for dense areas (e.g. Upper Hutt's Brewtown, which hosts four separate breweries at one address), and a styled popup with brewery details.
 
 Planned next: automated brewery discovery/closure detection, user check-ins, digital passports, and tiered rewards.
 
@@ -60,8 +60,10 @@ Connected to Vercel via GitHub — pushing to `main` triggers an automatic redep
 
 - [`docs/architecture.md`](./docs/architecture.md) — how the pieces fit together, data flow
 - [`docs/schema.md`](./docs/schema.md) — database schema reference *(to be written)*
-- [`docs/decisions.md`](./docs/decisions.md) — key technical/product decisions and why *(to be written)*
-- [`docs/automation-plan.md`](./docs/automation-plan.md) — plan for automated brewery discovery and closure detection *(in progress)*
+- [`docs/decisions.md`](./docs/decisions.md) — key technical/product decisions and why
+- [`docs/craftbeer-kiwi-automation-plan.md`](./docs/craftbeer-kiwi-automation-plan.md) — plan for automated brewery discovery and closure detection
+- [`docs/retrospective.md`](./docs/retrospective.md) — project retrospective, session-by-session
+- [`docs/todo.md`](./docs/todo.md) — outstanding work, single source of truth
 
 ## Status
 

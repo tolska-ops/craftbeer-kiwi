@@ -6,19 +6,27 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ---
 
-## Theming: `themeId` + `THEMES` registry, not a `darkMode` boolean
+## Documentation process: proactive tracking over ad-hoc updates
 
-**Decided:** Replace the earlier `darkMode` boolean toggle with a `themeId` string and a `THEMES` registry object. Each theme entry bundles a Mapbox `mapStyle` URL, an `accent` colour, and header `headerBg`/`headerText` colours in one place; a `<select>` dropdown in the header replaces the old toggle button.
+**Decided:** Formalised how the living docs (README, architecture, automation-plan, retrospective, decisions) get maintained: proactively prompt to update the relevant doc(s) whenever a session involves a schema change, architecture change, major feature, or significant decision — rather than waiting to be asked. Added alongside this: in-session mismatch flagging (raise it the moment something contradicts an uploaded doc, not just at the end), a "pending re-upload" log so a doc regenerated for download isn't wrongly assumed to have made it back into project knowledge, an end-of-session git status/unpushed-work check, and a prompt to regenerate any committed doc as a PDF for Andy's Dropbox folder.
 
-**Why:** A boolean only ever supports two states. The product direction called for more than light/dark (Dive Bar and Hop Explosion were already planned), so a registry keyed by `themeId` scales to any number of themes without new branching logic each time one's added — swapping themes becomes "add an entry to `THEMES`," not "add another special case."
+**Why:** Doc drift had become a recurring, named pattern by 20 July (see `retrospective.md` block 7) — several sessions had discovered docs had fallen behind actual state, or that edits made in one place hadn't persisted to another. Treating doc maintenance as a tracked process rather than a one-off fix was judged worth the overhead.
 
-**Status:** Light and Dark are fully implemented with real Mapbox style URLs. Dive Bar and Hop Explosion are structurally wired up (selectable, switch state correctly) but still point at placeholder style URLs — see the automation/theme to-do in `todo.md` for the two candidate paths (Mapbox Standard presets vs. fully custom Studio styles).
-
-**Ruled out:** Keeping the boolean and adding more special-cased toggle states — rejected as it wouldn't scale past a third theme without increasingly awkward conditional logic.
+**Ruled out:** Leaving it as an informal "update docs at the end if there's time" habit — this was the status quo that produced the drift in the first place (`architecture.md` sat unupdated from 11 July to 27 July as a direct result).
 
 ---
 
-## Domain: no nameserver switch to Vercel
+## Map theming: `themeId` + registry, not a dark-mode boolean
+
+**Decided:** Replace the earlier `darkMode` boolean with a `themeId` string and a `THEMES` registry object (accent colour, header background/text, Mapbox `mapStyle` URL per theme), selected via a `<select>` dropdown in the header.
+
+**Why:** A boolean only scales to two states. The product direction (playful, brand-driven map themes — Dive Bar, Hop Explosion — beyond just light/dark) needed an extensible structure from the start rather than a rewrite later.
+
+**Trade-off accepted:** Two of the four themes (Dive Bar, Hop Explosion) shipped structurally complete but visually unfinished — placeholder Mapbox style URLs — because a suitable style wasn't found in Mapbox's community gallery. Judged better to ship the extensible structure now and finish the visuals in a dedicated session than to hold up the whole feature.
+
+---
+
+## Domain: A record, not nameserver switch
 
 **Decided:** Point `craftbeer.kiwi` at Vercel via an A record at host `@`, not by switching nameservers to Vercel.
 

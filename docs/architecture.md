@@ -1,10 +1,10 @@
 # Architecture Overview
 
-**Last updated:** 25 July 2026
+**Last updated:** 27 July 2026
 
 ## Summary
 
-craftbeer.kiwi is a client-rendered React app that fetches brewery data from Supabase and plots it on a Mapbox map. There's no custom backend server for the main app — Supabase's auto-generated REST API is the read path, and Vercel hosts the static built frontend. Data maintenance (finding new breweries, catching closures) runs separately via two scheduled Supabase Edge Functions.
+craftbeer.kiwi is a client-rendered React app that fetches brewery data from Supabase and plots it on a Mapbox map. There's no custom backend server for the frontend's own use — Supabase's auto-generated REST API is the read path, and Vercel hosts the static built frontend. Supabase Edge Functions now provide a second, separate write path: scheduled/manually-triggered server-side automation that checks for closed breweries and discovers new ones.
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
@@ -13,14 +13,12 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 └──────┬───────┘      └──────────────┘      └─────────────┘
        │  fetch breweries (read-only, public)
        ▼
-┌─────────────┐      ┌──────────────────┐
-│   Supabase   │◄─────│  brewery-sync     │  (closure-check)
-│  (Postgres + │      │  Edge Function    │
-│  auto REST   │      └──────────────────┘
-│     API)     │      ┌──────────────────┐
-│              │◄─────│  brewery-discover │  (new brewery discovery)
-└─────────────┘      │  Edge Function    │
-                       └──────────────────┘
+┌─────────────┐      ┌───────────────────┐      ┌──────────────┐
+│   Supabase   │◄────►│  Edge Functions    │─────►│ Google Places │
+│  (Postgres + │      │  brewery-sync      │      │      API      │
+│  auto REST   │      │  brewery-discover  │      └──────────────┘
+│     API)     │      └───────────────────┘
+└─────────────┘
        │  map tiles / geocoding
        ▼
 ┌─────────────┐
@@ -33,44 +31,40 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 ### Frontend — React + Vite
 
 - Built with Vite (switched from Create React App early on — faster dev server, simpler config).
-- Single main component (`App.jsx`) currently handles data fetching, map rendering, marker clustering, and popup display. No routing yet — it's a one-page app.
+- Single main component (`App.jsx`) currently handles data fetching, map rendering, marker clustering, theming, and popup display. No routing yet — it's a one-page app; size/complexity is becoming a factor in planning future features (e.g. search is planned to be extracted into its own `SearchBar.jsx` rather than added inline).
 - Fetches brewery data once on mount via `supabase.from('breweries').select('*')`.
 - Marker clustering: builds a `supercluster` index from brewery coordinates, recalculates visible clusters on map move/zoom, renders either a numbered cluster circle or an individual themed pin depending on zoom level.
-- Per-brewery visual theming: a lookup function (`getBreweryTheme`) maps each brewery name to a colour scheme loosely reflecting its own branding (e.g. Garage Project's purple, Panhead's black-and-orange). Falls back to a default colour for any brewery not explicitly listed. Every brewery must have an explicit entry — no relying on the default.
-
-### Frontend — map theming
-
-- Shipped 21 July, replacing the old boolean `darkMode` toggle with a `themeId` string and a `THEMES` registry, selected via a `<select>` dropdown in the header.
-- Each theme entry defines `mapStyle`, `accent`, `headerBg`, and `headerText`.
-- **Light** and **Dark** themes are fully implemented with real Mapbox style URLs (`light-v11` / `dark-v11`).
-- **Dive Bar** and **Hop Explosion** are structurally wired up (selectable, switch state correctly) but still point at placeholder `mapStyle` URLs — visual identity for these two is a deferred, separate to-do. Two candidate approaches are under consideration: Mapbox's Standard style with its Monochrome/Faded presets (a different architecture from the current classic styles — 3D buildings, light presets — so not a drop-in URL swap), or fully custom styles built from scratch in Mapbox Studio.
+- Per-brewery visual theming: a lookup function (`getBreweryTheme`) maps each brewery name to a colour scheme loosely reflecting its own branding (e.g. Garage Project's purple, Panhead's black-and-orange). Every brewery must have an explicit entry — no falling back to a default colour (standing rule, see `decisions.md`).
+- **Map theme-switching system** (shipped 21 July): replaces the earlier dark-mode boolean. A `themeId` string plus a `THEMES` registry (accent/headerBg/headerText/mapStyle per theme) drives a `<select>` dropdown in the header. Light and Dark themes are live with real Mapbox style URLs (`light-v11`/`dark-v11`). Dive Bar and Hop Explosion are structurally wired up but still point at placeholder `mapStyle` URLs — visual identity for these two is a deferred, separate to-do.
+- **User location**: `GeolocateControl` plus a custom user-location marker using Andy's own hop-cone SVG artwork (replacing an earlier Claude-drawn approximation). Fly-to animation on pin click. A known bug (found 26 July, not yet fixed): the geolocation fallback can place the marker at a hardcoded Wellington CBD coordinate instead of the visitor's real position, likely because `getCurrentPosition` is called without options and is returning a cached or permission-denied result.
+- **Temporary closure status**: `status` / `status_note` fields drive a grey pin, badge, and popup note for breweries that are temporarily closed, kept distinct from `is_active` (permanently gone) and `flagged_for_review` (source disagreement). This is a manual-entry feature — a brewery's own website can't be relied on to announce a temporary closure, so there's no automated signal to detect it.
+- **Known regression**: the mobile popup header-obscuring bug (fixed 17 July, confirmed on real iPhone hardware 19 July) has reappeared as of 27 July — the 21 July theme-dropdown addition made the header taller, and the popup title now slides under it again on pin tap. Not yet fixed; see `todo.md`.
 
 ### Backend — Supabase
 
 - Postgres database, hosted in Supabase's Sydney region (closest available region to Wellington — there's no NZ region).
 - Supabase's Data API auto-generates a REST API over the schema. The frontend talks to this directly using `@supabase/supabase-js` — there's no custom API layer for reads.
 - **Row Level Security (RLS)** is enabled on all tables by default (project-level setting). Access is controlled per-table via explicit policies:
-  - `breweries` — public read-only (`select` policy allowing all) from the frontend. Writes happen only via Edge Functions (using the secret key, which bypasses RLS) or manually via the SQL/Table Editor.
-  - `check_ins` — no policies yet; fully locked down until user auth is built.
+  - `breweries` — public read-only (`select` policy allowing all). No write access from the client.
+  - `check_ins` — no policies yet; fully locked down until user auth/favourites is built.
 - **API exposure** is also controlled per-table, separately from RLS. Only `breweries` is currently exposed via the Data API; `check_ins` exists in the schema but isn't reachable via the API yet.
-- Two credential tiers: the **publishable key** (safe for frontend use, respects RLS) and the **secret key** (bypasses RLS — never used in frontend code, used server-side by the Edge Functions below).
-- `breweries` schema now includes `is_active`, `last_verified`, `place_id`, and `flagged_for_review` columns (added 13 July) in addition to the original fields — see the automation plan for detail.
+- Two credential tiers: the **publishable key** (safe for frontend use, respects RLS) and the **secret key** (bypasses RLS — never used in frontend code, used by Edge Functions for automation writes).
+- **Outstanding platform issue:** newly generated `sb_secret_...` keys consistently return `401 INVALID_CREDENTIALS` against both deployed Edge Functions, confirmed across two independently generated keys and three test methods (PowerShell, curl, dashboard test panel). Confirmed as a genuine Supabase platform-side issue, not a code problem — blocks manual testing of `brewery-discover` specifically. See `todo.md`.
 
-### Backend — Supabase Edge Functions (brewery data maintenance)
+### Automation infrastructure — Edge Functions
 
-Two separate scheduled functions, deliberately kept apart rather than combined into one, for cost-tier isolation and to limit the blast radius of a bug in either:
+Two Supabase Edge Functions, deliberately kept as separate deployments rather than one combined function, for cost-tier isolation and failure blast-radius reasons (see `decisions.md`):
 
-- **`brewery-sync`** (closure-check) — written and deployed 20 July, and successfully tested end-to-end (`{"checked":18,"flagged":0,"errors":[]}`). For each brewery with a `place_id`, checks Google Places' `businessStatus`. Per the two-source-agreement rule, a single Places "closed" signal writes to `flagged_for_review` rather than auto-flipping `is_active` — full auto-close is planned once the NZBN API is wired in as a second source.
-- **`brewery-discover`** (new brewery discovery) — written and deployed 20 July, but **not yet successfully tested end-to-end**: no confirmation yet that it correctly finds, dedupes, and inserts new breweries. A `dryRun` safety flag (return what would be inserted without writing to the live table) was discussed and is worth adding before the first real run, but isn't implemented yet.
-- Both functions are currently blocked from manual testing by a Supabase platform issue: new-format `sb_secret_...` keys return `401 INVALID_CREDENTIALS` against both functions, confirmed as a genuine platform-side bug, not a code problem. See the automation plan for the current status and next step.
-- Neither function is scheduled yet — both are manual-trigger only until proven.
+- **`brewery-sync`** (closure-check) — written using the `withSupabase`/`@supabase/server` auth pattern (a mid-project Supabase platform change that superseded the automation plan's original manual-client approach). Deployed and successfully tested end-to-end (`{"checked":18,"flagged":0,"errors":[]}`). Implements the two-source-agreement safety rule: `is_active` only auto-flips to `false` when both Google Places API and NZBN agree a brewery is closed; a single Places signal alone writes to `flagged_for_review` instead. NZBN isn't wired in yet, so today this effectively means every closure signal is flagged for manual review, not auto-closed.
+- **`brewery-discover`** (discovery) — written and deployed, but not yet successfully tested end-to-end due to the `sb_secret_...` key issue above. No confirmation yet that it correctly finds, dedupes, and inserts new breweries. A `dryRun` safety flag (return what would be inserted without writing to the live table) was discussed and is worth adding before the first real run, given it writes directly to the live `breweries` table.
+- Both functions are currently **manual-trigger only** — scheduling (`pg_cron` or Supabase's built-in cron) is planned once each has a proven successful manual run.
+- **Known blind spot:** name-based discovery (this function, plus the Places API and excise-list cross-checks) treats multiple venues under one brand as duplicates, so a second site for an existing brand can be silently skipped. Regional tourism board pages surface multi-site brands more reliably. Found via Garage Project Wild Workshop being missed despite Garage Project already being in the directory — see `decisions.md`.
 
 ### Mapping — Mapbox
 
 - `react-map-gl` (React wrapper around Mapbox GL JS) renders the map itself.
-- Base style depends on the active theme (see Theming above) — `light-v11` and `dark-v11` are live; Dive Bar/Hop Explosion styles are placeholders pending design work.
+- Base style is now theme-dependent (see theme-switching above): `light-v11` for Light, `dark-v11` for Dark. Dive Bar and Hop Explosion are on placeholder styles pending a decision between Mapbox's Standard style (built-in Monochrome/Faded presets — architecturally different from the classic styles above, would need its own implementation) versus fully custom Mapbox Studio styles.
 - Access via a public Mapbox token (`pk.…`), safe to expose in frontend code by design — Mapbox tokens are scoped/rate-limited, not secret credentials.
-- Custom hop-cone SVG marker for the user's own location, replacing the earlier pulsing blue circle (shipped 21 July).
 
 ### Hosting — Vercel
 
@@ -78,30 +72,32 @@ Two separate scheduled functions, deliberately kept apart rather than combined i
 - Environment variables (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_MAPBOX_TOKEN`) are set manually in the Vercel dashboard — they're not pulled from `.env.local` automatically, since that file is (correctly) never committed to the repo.
 - Hobby (free) plan — sufficient for current traffic levels.
 
+### Security
+
+- 2FA enabled on GitHub, Supabase, and Vercel accounts (25 July) — closes out a to-do that had been carried forward across several prior sessions.
+- Google Places API key is restricted to the Places API only, stored in Bitwarden as a Secure Note. Application (IP) restriction is deliberately deferred until the Edge Functions' egress IPs are known.
+
 ## Data flow: loading the map
 
 1. Browser loads the app from Vercel's CDN.
 2. React mounts, `useEffect` fires a fetch to Supabase's REST API for all rows in `breweries` where `is_active = true`.
 3. Supabase checks the request against the `breweries` table's RLS policy, returns matching rows (subject to the publishable key's permissions).
 4. Frontend builds a `supercluster` index from the returned coordinates.
-5. Map renders, styled according to the currently selected theme; clusters/pins recalculated on every pan/zoom based on current viewport bounds.
-6. Clicking a pin opens a popup sourced from that brewery's row (name, address, description, website) — no additional network request, data's already local from step 3.
+5. Map renders; clusters/pins recalculated on every pan/zoom based on current viewport bounds.
+6. Clicking a pin opens a popup sourced from that brewery's row (name, address, description, website, and status/status_note if temporarily closed) — no additional network request, data's already local from step 3.
 
-## Data flow: automated maintenance (separate from the above)
+## Data flow: automation (separate from the above)
 
-1. `brewery-sync` runs (currently manual-trigger only), checks each brewery with a `place_id` against Google Places, and either updates `last_verified`, flags for review, or (once NZBN is wired in) auto-closes on two-source agreement.
-2. `brewery-discover` runs (currently manual-trigger only, unproven), searches Places for new breweries in the target region, and inserts any not already matched by `place_id`.
-3. Neither function currently generates descriptions for new inserts — that step (via the Anthropic API) is planned but not yet built.
+1. `brewery-sync` is manually triggered (HTTP call to the deployed Edge Function).
+2. For each active brewery, it checks status against Google Places API (NZBN not yet wired in).
+3. Per the two-source-agreement rule: a "closed" signal from Places alone writes `flagged_for_review = true`, not `is_active = false`.
+4. `brewery-discover` (separately triggered) searches for candidate new breweries via Places API, intended to dedupe against existing rows and insert genuinely new ones — this step is unverified pending the key issue above.
 
 ## What's not built yet
 
-- **Authentication** — no user accounts exist. `check_ins` table exists in schema but has no policies and isn't exposed via the API.
-- **Any write path from the frontend** — the app itself is still fully read-only from the client's perspective. All writes happen via Edge Functions or manually via Supabase's SQL Editor/Table Editor.
-- **`brewery-discover` end-to-end verification** — written and deployed, but blocked from testing by the Supabase key issue noted above.
-- **NZBN API integration** — the second verification source needed to upgrade closure-check from single-source flagging to real two-source auto-close.
-- **Anthropic API description-generation step** for newly-discovered breweries.
-- **Scheduling** — both Edge Functions are manual-trigger only; `pg_cron`/Supabase's built-in cron scheduling hasn't been set up yet.
-- **Dive Bar / Hop Explosion theme visuals** — structurally wired up, real style URLs still pending.
-- **Favourites / brewery trail persistence** — design decided (anonymous `crypto.randomUUID()` in `localStorage`, a `trails` table, 7-day expiry via a scheduled function, separate public share-codes), nothing built yet.
-- **Name search** — planned as client-side filtering before the supercluster index, likely a new `SearchBar.jsx` component; not started.
-- **Custom domain** — currently live only at the `.vercel.app` URL; `craftbeer.kiwi` DNS not yet pointed at Vercel (blocked on a Discount Domains portal bug — see the to-do list).
+- **Authentication / favourites** — no user accounts. Favourites/trail persistence is designed (anonymous `crypto.randomUUID()` device ID in `localStorage`, a `trails` table, scheduled cleanup, separate share-codes for sharing) but not yet built. `check_ins` table exists in schema but has no policies and isn't exposed via the API.
+- **Any write path from the frontend** — the app is currently fully read-only from the client's perspective. All manual data changes happen via Supabase's SQL Editor or Table Editor; automated writes happen only via the Edge Functions above.
+- **Scheduling for the Edge Functions** — both are manual-trigger only today.
+- **NZBN API integration** — second verification source for closure-check; once wired in, `brewery-sync` can upgrade from single-source `flagged_for_review` to real two-source auto-close.
+- **Name search** — client-side filtering, planned as a dedicated `SearchBar.jsx` component.
+- **Custom domain** — currently live only at the `.vercel.app` URL; `craftbeer.kiwi` DNS not yet pointed at Vercel (blocked on a registrar-side portal bug — see `todo.md`).
