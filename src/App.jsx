@@ -8,6 +8,7 @@ import './App.css'
 import { Analytics } from '@vercel/analytics/react'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
+const APP_ENV = import.meta.env.VITE_APP_ENV || 'production'
 
 // Per-brewery visual identity — colour/icon nods to each brewery's own branding.
 // Falls back to a default orange pin for any brewery not listed here.
@@ -189,8 +190,22 @@ const theme = THEMES[themeId];
     {Object.values(THEMES).map((t) => (
       <option key={t.id} value={t.id}>{t.label}</option>
     ))}
-  </select>
-</header>
+    </select>
+        {APP_ENV !== 'production' && (
+          <span style={{
+            background: '#dc2626',
+            color: '#fff',
+            fontWeight: 700,
+            fontSize: '12px',
+            padding: '4px 10px',
+            borderRadius: '4px',
+            marginLeft: '10px',
+            letterSpacing: '0.5px'
+          }}>
+            DEV
+          </span>
+        )}
+      </header>
       {error && <p style={{ color: 'red', padding: '8px' }}>Error: {error}</p>}
 
       <Map
