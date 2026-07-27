@@ -33,6 +33,10 @@ function getBreweryTheme(name) {
     'North End Brewing': { fill: '#C9A66B', stroke: '#FFF', iconColor: '#FFF' },
     "Duncan's Brewing Company": { fill: '#D4AC0D', stroke: '#FFF', iconColor: '#FFF' },
     'Waitoa': { fill: '#3A3A3A', stroke: '#E8720C', iconColor: '#FFF' },
+    'Three Sisters Brewery Ltd': { fill: '#0B7285', stroke: '#FFF', iconColor: '#FFF' },
+    'Double Vision Brewing - DUB HUB Island Bay': { fill: '#9B8FF5', stroke: '#FFF', iconColor: '#FFF' },
+    'Panhead Tory Street': { fill: '#2A2A2A', stroke: '#D4720A', iconColor: '#D4720A' },
+    'Waitoa Victoria St': { fill: '#575757', stroke: '#E8720C', iconColor: '#FFF' },
   }
   return themes[name] || { fill: '#D4720A', stroke: '#FFF', iconColor: '#FFF' }
 }
