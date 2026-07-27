@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import Map, { Marker, Popup, GeolocateControl } from 'react-map-gl/mapbox'
+import Map, { Marker, Popup, GeolocateControl, Source, Layer } from 'react-map-gl/mapbox'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
 import Supercluster from 'supercluster'
@@ -153,13 +153,21 @@ const theme = THEMES[themeId];
     )
     return index
   }, [breweries])
-
-  // Recalculate visible clusters whenever bounds/zoom change
+    // Recalculate visible clusters whenever bounds/zoom change
   const clusters = useMemo(() => {
     if (!supercluster || !bounds) return []
     return supercluster.getClusters(bounds, Math.floor(zoom))
   }, [supercluster, bounds, zoom])
-
+const labelGeoJSON = useMemo(() => ({
+  type: 'FeatureCollection',
+  features: clusters
+    .filter((f) => !f.properties.cluster)
+    .map((f) => ({
+      type: 'Feature',
+      properties: { name: f.properties.brewery.name },
+      geometry: f.geometry
+    }))
+}), [clusters])
   const updateBoundsAndZoom = useCallback(() => {
     if (!mapRef.current) return
     const b = mapRef.current.getBounds()
@@ -218,6 +226,27 @@ const theme = THEMES[themeId];
         onMoveEnd={updateBoundsAndZoom}
       >
         <GeolocateControl position="top-right" trackUserLocation={true} showUserHeading={true} />
+        <Source id="brewery-labels" type="geojson" data={labelGeoJSON}>
+          <Layer
+            id="brewery-name-labels"
+            type="symbol"
+            minzoom={14}
+            layout={{
+              'text-field': ['get', 'name'],
+              'text-size': 14,
+              'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+              'text-offset': [0, 1.4],
+              'text-anchor': 'top',
+              'text-allow-overlap': false,
+              'text-optional': true
+            }}
+            paint={{
+              'text-color': '#1a1a1a',
+              'text-halo-color': '#fff',
+              'text-halo-width': 2.5
+            }}
+          />
+        </Source>
         {userLocation && (
   <Marker
     longitude={userLocation.longitude}
