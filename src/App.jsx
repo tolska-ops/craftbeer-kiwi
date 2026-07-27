@@ -5,6 +5,7 @@ import mapboxgl from 'mapbox-gl'
 import Supercluster from 'supercluster'
 import { supabase } from './supabaseClient'
 import './App.css'
+import { Analytics } from '@vercel/analytics/react'
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 
@@ -167,7 +168,8 @@ const theme = THEMES[themeId];
 
   return (
     <div className="app-container">
-   <header className="app-header" style={{ background: theme.headerBg, color: theme.headerText }}>
+    <Analytics />
+    <header className="app-header" style={{ background: theme.headerBg, color: theme.headerText }}>
   <h1>craftbeer.kiwi</h1>
   <p>Wellington's craft brewery trail</p>
   <select
