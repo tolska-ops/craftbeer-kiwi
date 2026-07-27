@@ -182,8 +182,12 @@ const labelGeoJSON = useMemo(() => ({
     <div className="app-container">
     <Analytics />
     <header className="app-header" style={{ background: theme.headerBg, color: theme.headerText }}>
-  <h1>craftbeer.kiwi</h1>
-  <p>Wellington's craft brewery trail</p>
+      <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em' }}>
+        craftbeer.kiwi
+      </h1>
+    <p style={{ margin: '2px 0 0', fontSize: '13px', fontWeight: 400, opacity: 0.85 }}>
+     Every brewery. One map.
+    </p>
   <select
     value={themeId}
     onChange={(e) => setThemeId(e.target.value)}
