@@ -109,16 +109,17 @@ const theme = THEMES[themeId];
         latitude: position.coords.latitude,
       });
     },
-    () => {
-      setUserLocation(wellingtonCBD);
-    },
-    { enableHighAccuracy: false, timeout: 8000 }
+  () => {
+  // Permission denied, timeout, or position unavailable — don't guess.
+  // Leave userLocation as null so the marker simply doesn't render.
+},
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
   );
 }, []);
 
   useEffect(() => {
     async function fetchBreweries() {
-      const { data, error } = await supabase.from('breweries').select('*').eq('is_active', true)
+      const { data, error } = await supabase.from('breweries').select('*').eq('is_active', true).eq('venue_type', 'brewery')
       if (error) {
         setError(error.message)
       } else {
