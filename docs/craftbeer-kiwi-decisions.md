@@ -6,7 +6,32 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ---
 
+## `venue_type` field: retain-and-flag, not delete, for non-brewery discoveries
+
+**Decided:** When `brewery-discover` picks up a venue that isn't actually a brewery (a bar/pub that pours craft beer, or a general venue caught by a broad search), don't delete the row. Add a `venue_type` text field (default `'brewery'`), set it to `'bar'` for these cases, and filter the frontend map query on `venue_type = 'brewery'` in addition to the existing `is_active = true`.
+
+**Why:** Two reasons. First, deleting the row would also delete its `place_id` from the table — since dedup only checks existing `place_id`s, the exact same bar would just get rediscovered as "new" on every future `brewery-discover` run, wasting API calls and requiring the same manual triage repeatedly. Retaining the row with a flag makes it permanently "known" without needing to reappear on the map. Second, Andy raised that a "pubs & bars serving craft beer" layer/filter is a plausible future feature — a string field (rather than a plain `is_brewery` boolean) leaves room to add more categories later (`bottle_shop`, `festival`, etc.) without another schema migration, and the excluded venues are already sitting there correctly labelled if that feature gets built.
+
+**Ruled out:** Deleting non-brewery rows outright — simpler in the moment, but actively counterproductive given how dedup works. A plain boolean (`is_brewery`) — technically sufficient for today's two categories, but foreclosed the "pubs as their own thing" possibility Andy specifically flagged as being of interest down the track.
+
+**Tested first in `craftbeer-kiwi-DEV`:** column added and frontend filter tested there before the equivalent change was made in production, consistent with the project's dev/prod workflow.
+
+---
+
+## Edge Function secret-key auth: named keys are required, not optional
+
+**Decided (root cause, not really a "decision" — a bug fix):** `@supabase/server`'s secret-key auth mode must be written as `auth: "secret:<name>"`, where `<name>` matches the label given to the key in Supabase's dashboard (Settings → API Keys). Both `brewery-sync` and `brewery-discover` were originally written with just `auth: "secret"` — no name — which the SDK can't resolve to any actual key, so it correctly (if unhelpfully) rejected every request with a generic "invalid credentials" 401, regardless of which valid `sb_secret_...` key was sent.
+
+**Why this took a week to find:** the error message ("Invalid credentials" / `INVALID_CREDENTIALS`) looked identical whether the problem was a wrong key, a missing header, or (the actual cause) a missing key-name in the auth config — there was no signal pointing specifically at the code's own auth mode being incomplete. Ruled out along the way, in order: the Supabase platform's separate legacy `verify_jwt` gateway check (already correctly disabled); sending the key in the wrong header (`Authorization` instead of `apikey` — a real, documented common mistake, but not what was happening here); a stale/rotated key mismatch (ruled out once a second, freshly-generated key produced the identical error). The actual fix was found by reading Supabase's own "Securing Edge Functions" documentation in full, specifically the table describing `@supabase/server`'s auth modes — it explicitly requires `'secret:<name>'`, not bare `'secret'`.
+
+**Fix:** both functions changed to `auth: "secret:brewery_sync_v2"` (the name of the currently-active key) and redeployed. Confirmed working via the dashboard's test panel.
+
+**Lesson for future Edge Functions:** always specify a named key in `auth: 'secret:<name>'` mode, never bare `'secret'` — and when troubleshooting a generic-looking 401 from `@supabase/server`, check the function's own `auth` configuration string itself before assuming the problem is external (wrong key, platform bug, expired credential).
+
+---
+
 ## Documentation process: proactive tracking over ad-hoc updates
+
 
 **Decided:** Formalised how the living docs (README, architecture, automation-plan, retrospective, decisions) get maintained: proactively prompt to update the relevant doc(s) whenever a session involves a schema change, architecture change, major feature, or significant decision — rather than waiting to be asked. Added alongside this: in-session mismatch flagging (raise it the moment something contradicts an uploaded doc, not just at the end), a "pending re-upload" log so a doc regenerated for download isn't wrongly assumed to have made it back into project knowledge, an end-of-session git status/unpushed-work check, and a prompt to regenerate any committed doc as a PDF for Andy's Dropbox folder.
 

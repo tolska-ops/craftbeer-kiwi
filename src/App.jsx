@@ -95,12 +95,10 @@ const theme = THEMES[themeId];
 
   const mapRef = useRef(null)
   useEffect(() => {
-  const wellingtonCBD = { longitude: 174.7762, latitude: -41.2865 };
-
-  if (!navigator.geolocation) {
-    setUserLocation(wellingtonCBD);
-    return;
-  }
+   if (!navigator.geolocation) {
+  // Geolocation not supported at all — don't guess, leave marker unrendered.
+  return;
+}
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
