@@ -4,7 +4,7 @@
 
 ## Summary
 
-craftbeer.kiwi is a client-rendered React app that fetches brewery data from Supabase and plots it on a Mapbox map. There's no custom backend server for the frontend's own use — Supabase's auto-generated REST API is the read path, and Vercel hosts the static built frontend. Supabase Edge Functions provide a second, separate write path: scheduled/manually-triggered server-side automation that checks for closed breweries and discovers new ones. The site is now live at its own domain, with basic visitor analytics, and there's a separate dev-only Supabase project so schema/Edge Function changes can be tested without touching production data.
+craftbeer.kiwi is a client-rendered React app that fetches brewery data from Supabase and plots it on a Mapbox map. There's no custom backend server for the frontend's own use — Supabase's auto-generated REST API is the read path, and Vercel hosts the static built frontend. Supabase Edge Functions provide a second, separate write path: scheduled/manually-triggered server-side automation that checks for closed breweries and discovers new ones. The site is now live at its own domain, with basic visitor analytics, and there's a separate dev-only Supabase project so schema/Edge Function/frontend changes can be tested without touching production data or visitors.
 
 ```
 ┌─────────────┐      ┌──────────────┐      ┌─────────────┐
@@ -21,7 +21,7 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 │  auto REST   │      └───────────────────┘
 │     API)     │
 └─────────────┘
-       │  map tiles / geocoding
+       │  map tiles / geocoding / native symbol-layer labels
        ▼
 ┌─────────────┐              ┌──────────────────┐
 │   Mapbox     │              │  Supabase DEV     │  ← local-only,
@@ -40,6 +40,7 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 - Fetches brewery data once on mount via `supabase.from('breweries').select('*')`.
 - Marker clustering: builds a `supercluster` index from brewery coordinates, recalculates visible clusters on map move/zoom, renders either a numbered cluster circle or an individual themed pin depending on zoom level.
 - Per-brewery visual theming: a lookup function (`getBreweryTheme`) maps each brewery name to a colour scheme loosely reflecting its own branding (e.g. Garage Project's purple, Panhead's black-and-orange). Every brewery must have an explicit entry — no falling back to a default colour (standing rule, see `craftbeer-kiwi-decisions.md`).
+- **Brewery name labels** (shipped 27 July): a native Mapbox `<Source>`/`<Layer>` (symbol layer) renders brewery names as text, separate from the pin `Marker` components. Built from a `labelGeoJSON` memo derived from the already zoom-aware `clusters` array (filtered to exclude anything currently absorbed into a numbered cluster bubble) rather than the raw `breweries` array — this was a real bug caught and fixed during testing, since building from raw `breweries` produced floating labels for pins hidden inside cluster circles. Labels only appear at `minzoom={14}` (deliberately tuned up from an initial `13` after testing showed the lower threshold felt crowded; `14` was chosen because it matches the existing pin-click `flyTo` zoom, so labels tend to appear right where users naturally land anyway). Styled bold, 14px, with a 2.5px halo for legibility, confirmed readable on both Light and Dark themes. Uses `text-allow-overlap: false` for genuine label-vs-label collision detection — Mapbox will hide a label rather than let it overlap another. **Known limitation:** because pins remain separate React `Marker` components entirely outside Mapbox's own rendering system, a label can still visually overlap a *neighbouring pin* (not just another label) — Mapbox's collision detection has no awareness of the pins at all. This is the accepted trade-off of keeping pins visually unchanged rather than migrating them into the symbol-layer system too; see `craftbeer-kiwi-todo.md` for the deferred full-migration option.
 - **Map theme-switching system** (shipped 21 July): replaces the earlier dark-mode boolean. A `themeId` string plus a `THEMES` registry (accent/headerBg/headerText/mapStyle per theme) drives a `<select>` dropdown in the header. Light and Dark themes are live with real Mapbox style URLs (`light-v11`/`dark-v11`). Dive Bar and Hop Explosion are structurally wired up but still point at placeholder `mapStyle` URLs — visual identity for these two is a deferred, separate to-do.
 - **Environment indicator badge** (added 27 July): a small red "DEV" badge renders in the header, next to the theme dropdown, whenever the app is running against a non-production environment. Driven by a single constant — `const APP_ENV = import.meta.env.VITE_APP_ENV || 'production'` — read from a new `VITE_APP_ENV` variable. Local `.env.local` sets this to `development`; Vercel's production environment variables don't set it at all, so it correctly defaults to `'production'` and the badge never renders on the live site. Added specifically to prevent the kind of mix-up that nearly caused a schema change to run against the wrong project (see `craftbeer-kiwi-retrospective.md`, block 12).
 - **User location**: `GeolocateControl` plus a custom user-location marker using Andy's own hop-cone SVG artwork (replacing an earlier Claude-drawn approximation). Fly-to animation on pin click. A known bug (found 26 July, not yet fixed): the geolocation fallback can place the marker at a hardcoded Wellington CBD coordinate instead of the visitor's real position, likely because `getCurrentPosition` is called without options and is returning a cached or permission-denied result.
@@ -59,13 +60,12 @@ craftbeer.kiwi is a client-rendered React app that fetches brewery data from Sup
 
 ### Backend — Supabase (dev)
 
-Added 27 July, as a genuinely separate Supabase project rather than a branch of production (see `craftbeer-kiwi-decisions.md` for why branching was ruled out).
+Added 27 July, as a genuinely separate Supabase project rather than a branch of production (see `craftbeer-kiwi-decisions.md` for why branching was ruled out). Already proven its worth: caught a near-miss schema mix-up and two real bugs in the brewery name labels feature (see below), all before anything reached production.
 
 - **`craftbeer-kiwi-DEV`** — a second, free-tier Supabase project. Hosted in Supabase's Tokyo region rather than production's Sydney region — a deliberate, low-stakes deviation, not worth blocking on.
 - Schema mirrors production: `breweries` and `check_ins` tables, same columns/types, same RLS setup (enabled on both tables, public read-only `select` policy on `breweries`).
-- Seeded with 3 fake test breweries (not real data), including one deliberately `is_active = false`, so the `is_active` filter can be exercised locally without touching real brewery records.
+- Used for both backend and frontend testing: originally intended for schema/Edge Function changes, but its first real use (27 July) was testing a purely frontend feature (brewery name labels) with disposable test data — deliberately dense/overlapping test breweries and long real brewery names, both cleaned up before the final version reached production.
 - **Only connected via local `.env.local`** — `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` point here when running `npm run dev` locally. Vercel's dashboard environment variables are untouched and continue to point at the production project, so production deploys are entirely unaffected by whatever's happening in dev.
-- **Purpose:** lets schema changes and Edge Function updates get tested against throwaway data before they touch the live `breweries` table — the intended first real use is the NZBN API integration.
 - **Known constraints:** this uses the second of Andy's two free-tier Supabase project slots (the free plan allows two). Free-tier projects also auto-pause after roughly a week of inactivity and need a manual "wake" (usually just opening the dashboard) if left untouched between sessions.
 
 ### Automation infrastructure — Edge Functions
@@ -82,6 +82,7 @@ Two Supabase Edge Functions, deliberately kept as separate deployments rather th
 - `react-map-gl` (React wrapper around Mapbox GL JS) renders the map itself.
 - Base style is now theme-dependent (see theme-switching above): `light-v11` for Light, `dark-v11` for Dark. Dive Bar and Hop Explosion are on placeholder styles pending a decision between Mapbox's Standard style (built-in Monochrome/Faded presets — architecturally different from the classic styles above, would need its own implementation) versus fully custom Mapbox Studio styles.
 - Access via a public Mapbox token (`pk.…`), safe to expose in frontend code by design — Mapbox tokens are scoped/rate-limited, not secret credentials.
+- Two rendering systems now coexist on the same map: brewery pins are plain React `Marker` components (DOM elements positioned over the map), while brewery name labels use Mapbox's native `Source`/`Layer` symbol-layer system (rendered on the map canvas itself). They don't share collision awareness of each other — see the frontend section above for the known limitation this causes.
 
 ### Hosting — Vercel
 
@@ -102,7 +103,7 @@ Two Supabase Edge Functions, deliberately kept as separate deployments rather th
 2. React mounts, `useEffect` fires a fetch to Supabase's REST API for all rows in `breweries` where `is_active = true`.
 3. Supabase checks the request against the `breweries` table's RLS policy, returns matching rows (subject to the publishable key's permissions).
 4. Frontend builds a `supercluster` index from the returned coordinates.
-5. Map renders; clusters/pins recalculated on every pan/zoom based on current viewport bounds.
+5. Map renders; clusters/pins recalculated on every pan/zoom based on current viewport bounds. Once zoomed past level 14, a separate Mapbox symbol layer also renders name labels for any pin that isn't currently absorbed into a cluster.
 6. Clicking a pin opens a popup sourced from that brewery's row (name, address, description, website, and status/status_note if temporarily closed) — no additional network request, data's already local from step 3.
 
 **In local dev**, steps 2-3 hit the separate `craftbeer-kiwi-DEV` Supabase project instead (per `.env.local`), so the browser shows only the fake test breweries seeded there, and a red DEV badge renders in the header as a visual reminder which environment is active.
@@ -121,6 +122,7 @@ Both functions currently target the production Supabase project only.
 - **Authentication / favourites** — no user accounts. Favourites/trail persistence is designed (anonymous `crypto.randomUUID()` device ID in `localStorage`, a `trails` table, scheduled cleanup, separate share-codes for sharing) but not yet built. `check_ins` table exists in schema but has no policies and isn't exposed via the API.
 - **Any write path from the frontend** — the app is currently fully read-only from the client's perspective. All manual data changes happen via Supabase's SQL Editor or Table Editor; automated writes happen only via the Edge Functions above.
 - **Scheduling for the Edge Functions** — both are manual-trigger only today.
-- **NZBN API integration** — second verification source for closure-check; once wired in, `brewery-sync` can upgrade from single-source `flagged_for_review` to real two-source auto-close. First candidate planned to actually exercise the new dev/prod split.
+- **NZBN API integration** — second verification source for closure-check; once wired in, `brewery-sync` can upgrade from single-source `flagged_for_review` to real two-source auto-close. First candidate planned to actually exercise the dev/prod split for a backend/schema change specifically (the labels feature above tested the split for a frontend change).
 - **Name search** — client-side filtering, planned as a dedicated `SearchBar.jsx` component.
-- **Edge Functions running against the dev Supabase project** — currently both `brewery-sync` and `brewery-discover` only exist as deployments against production; there's no dev-environment version of either yet, so testing changes to them still means editing and redeploying against production directly (carefully) rather than a true dev-first workflow.
+- **Edge Functions running against the dev Supabase project** — currently both `brewery-sync` and `brewery-discover` only exist as deployments against production; there's no dev-environment version of either yet.
+- **Full pin+label symbol-layer migration** — would resolve the one known limitation of the current brewery name labels (a label can still overlap a neighbouring pin, since pins and labels currently live in two separate, mutually-unaware rendering systems). Would require pre-rendered themed pin images per brewery/colour combination rather than the current live SVG/CSS `Marker` approach — a bigger job, deferred since it's a minor visual issue rather than a functional one.
