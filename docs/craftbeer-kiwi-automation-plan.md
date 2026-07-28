@@ -1,13 +1,13 @@
 # craftbeer.kiwi — Automated Brewery Discovery & Closure Detection
 
-**Written:** 11 July 2026 · **Updated:** 27 July 2026
+**Written:** 11 July 2026 · **Updated:** 28 July 2026
 **Purpose:** Living reference for the automation build — why it exists, the architecture, current status, and what's still ahead. Earlier versions of this doc were a forward-looking build plan; as of 20 July the core of both Edge Functions is written and deployed, and as of 27 July both have been successfully tested end-to-end for the first time — this version describes what's actually built, what's actually been proven to work, and what's still planned.
 
 ---
 
 ## Why this exists
 
-All 19 breweries in the database were originally added by hand — researched, verified, and typed in manually. That's fine at 19. It doesn't scale to 200+ (a full national directory) without a lot of ongoing manual upkeep, and breweries genuinely do close, move, and change hands regularly — several early corrections (Fortune Favours closed, Tuatara relocated, Boneface changed owners) confirmed this isn't a hypothetical risk.
+All 23 breweries in the database were originally added by hand, plus a handful discovered by automation as of 27 July — researched and verified for most. That's fine at this scale. It doesn't scale to 200+ (a full national directory) without a lot of ongoing manual upkeep, and breweries genuinely do close, move, and change hands regularly — several early corrections (Fortune Favours closed, Tuatara relocated, Boneface changed owners) confirmed this isn't a hypothetical risk.
 
 The goal: scheduled jobs that periodically check for new breweries and status changes on existing ones, so the directory stays current without Andy manually re-Googling every business every few months.
 
@@ -54,7 +54,7 @@ Registration and subscription-key setup at business.govt.nz hasn't happened yet.
 
 Two separate functions, deliberately kept apart (see `craftbeer-kiwi-decisions.md` for the cost-tier/blast-radius reasoning). **The `sb_secret_...` 401 issue that blocked testing for a week (see below) is now resolved for both.**
 
-**`brewery-sync`** (closure-check) — written using the `withSupabase`/`@supabase/server` auth pattern. Successfully tested end-to-end twice: `{"checked":18,"flagged":0,"errors":[]}` (20 July, before Garage Project Wild Workshop was added by hand) and `{"checked":19,"flagged":0,"errors":[]}` (27 July, after the auth fix, matching the current brewery count). Logic:
+**`brewery-sync`** (closure-check) — written using the `withSupabase`/`@supabase/server` auth pattern. Successfully tested end-to-end twice: `{"checked":18,"flagged":0,"errors":[]}` (20 July, before Garage Project Wild Workshop was added by hand) and `{"checked":19,"flagged":0,"errors":[]}` (27 July, after the auth fix, matching the brewery count at that point in the session — before `brewery-discover`'s own run later the same day brought the total to 23). Logic:
 1. For every brewery with a `place_id`, call the Places API's place details endpoint and read `businessStatus`.
 2. Per the two-source-agreement rule (see `craftbeer-kiwi-decisions.md`): a `CLOSED_PERMANENTLY` signal from Places alone writes `flagged_for_review = true`, **not** `is_active = false`, because NZBN isn't wired in yet to corroborate.
 3. `last_verified` is updated regardless of outcome.
@@ -126,9 +126,46 @@ Ministry of Justice — Register of Licences & Certificates, as a third, even-st
 
 Not part of the current build because it's a bulk file (updated quarterly — Feb/May/Aug/Nov), not a live API — a different integration pattern (download + parse + match) from the live Places/NZBN API calls. Worth adding once the core two-source system is working and proven, as a periodic extra cross-check rather than something the scheduled job queries directly.
 
+## National expansion: phased regional rollout
+
+**Decided 28 July:** expansion beyond Wellington will proceed region by region, with a mandatory dry-run + manual triage gate per region before anything goes live. This supersedes the "region scope" open question below — national-from-the-start was rejected as too risky given the 27 July run's ~50% false-positive rate in a market Andy knows personally; that error rate has no reason to be lower in unfamiliar regions, and there'd be no personal gut-check to catch it.
+
+### Prerequisites (block the entire rollout, not just region 2 onwards)
+
+1. **`dryRun` flag on `brewery-discover`.** Already a standing to-do; now a hard blocker rather than a nice-to-have. Must return candidate rows without writing to the live table.
+2. **Query narrowing decision.** Investigate whether Places' text search API supports excluding bar/pub categories, to reduce the false-positive rate before multiplying it across 10+ regions. If it can't be narrowed at the API level, the manual-triage step per region needs to be budgeted as real time in each region's rollout, not treated as a formality.
+3. **Region boundary definition.** Decide whether "a region" means a Places API geographic bounding box or a text-query bias per city/district (current Wellington query uses the latter). This determines how many separate `brewery-discover` runs a full national rollout actually is.
+
+None of the phase work below should start until these three are resolved.
+
+### Phase order
+
+Ordered by brewery density and how well Andy can personally sanity-check results, not alphabetically or by population:
+
+1. **Auckland and Canterbury (Christchurch)** — largest brewery scenes, highest volume-per-dry-run-effort. Less personally familiar than Wellington, so treat the first dry run here as a genuine test of the whole process, not a formality — expect the false-positive rate to need real scrutiny.
+2. **Waikato, Bay of Plenty, Otago** — smaller batches, lower risk if something slips through undetected.
+3. **Remaining regions** — likely batched together in one or two dry runs rather than one region at a time, since brewery density won't justify a dedicated session each.
+
+### Per-region workflow
+
+1. Run `brewery-discover` in dry-run mode for the region; review candidate rows.
+2. Manually triage: genuine breweries vs. bars/pubs (`venue_type`) vs. near-duplicates of existing multi-site brands. Per the known multi-site blind spot, cross-check against a regional tourism board page or similar for the region, not just the Places results — name-based matching alone has already been shown to both miss and duplicate multi-site brands unpredictably.
+3. Insert triaged rows to the live table.
+4. Add `getBreweryTheme` entries immediately for every new brewery — do not let a region go live with entries falling back to the default theme, per the existing standing rule.
+5. Update brewery counts and region status in `craftbeer-kiwi-todo.md` and `README.md` before starting the next region.
+
+### Related risks flagged for this rollout specifically
+
+- **Discovery automation's cost/benefit case changes.** The "Timing of further automation investment" open question below assumed discovery only pays off once new breweries arrive faster than by hand — national expansion is plausibly the point where that becomes true, which strengthens the case for finishing `dryRun` now rather than deferring it further.
+- **Theme colour uniqueness doesn't scale automatically.** `getBreweryTheme`'s per-brewery colour assignment is currently manual and eyeballed for distinctiveness. That gets harder to keep meaningfully distinct well past current brewery counts. Worth deciding on an assignment strategy (e.g. algorithmic hue rotation with manual override for brand-colour matches) before this becomes a slog of comparing similar oranges across regions — not yet designed, flagged here as a dependency of the rollout rather than solved.
+- **Distribution has no plan yet**, per the existing to-do — worth sequencing alongside expansion rather than after it.
+- **Multi-country domain/branding strategy stays parked** — this rollout only concerns NZ regions, not the Australia question.
+
+---
+
 ## Open questions
 
-- **Region scope:** start with Wellington-only automation (matches current data), or build for national from the start? Recommendation stands: keep Wellington-scoped for now, it's simpler to verify correctness — expand the search query's geographic bounds later once trusted.
+- **Region scope:** *(original question: start with Wellington-only automation, or build for national from the start?)* **Resolved 28 July** — region-by-region rollout with a dry-run gate per region, per the National Expansion Plan above.
 - **Schedule frequency:** weekly is a reasonable default once both functions are proven, but worth deciding based on how "urgent" catching a closure feels vs. API cost.
 - **Manual override:** should there be a simple way to force `is_active = false` on a brewery manually (e.g. if a closure is heard about before automation catches it)? Doing it via Supabase's Table Editor directly is fine for now — no need to build UI for this yet.
 - **Timing of further automation investment:** raised 25 July — `brewery-sync`/`brewery-discover` were built for a directory of 19 breweries; automating discovery only really pays off once new breweries are being added faster than by hand, which isn't the case yet. Not a reason to abandon what's built, but worth weighing against instrumentation/distribution work when planning the next session's effort (see `craftbeer-kiwi-todo.md`).
@@ -137,10 +174,11 @@ Not part of the current build because it's a bulk file (updated quarterly — Fe
 
 ## What needs building next, in order
 
-1. ~~Resolve the Supabase `sb_secret_...` key issue~~ — **done 27 July.** Root cause was an incomplete `auth: "secret"` mode missing the required key name; fixed to `auth: "secret:brewery_sync_v2"` on both functions.
-2. Add the `dryRun` flag to `brewery-discover` — still not built, and the 27 July run is a concrete example of why it's worth doing before the *next* live run, not just the first one.
-3. ~~Successfully test `brewery-discover` end-to-end~~ — **done 27 July**, `{"found":20,"inserted":12,"skipped":8}`, followed by manual triage of all 12 new rows.
-4. Consider narrowing the discovery search query to reduce bar/pub false-positives (see Open Questions above) — not yet investigated.
-5. Register for the NZBN API and wire it into `brewery-sync`, upgrading closure detection to real two-source auto-close.
-6. Add the Anthropic description-generation step for newly-discovered breweries.
-7. Schedule both functions (`pg_cron` or Supabase's built-in cron) — now that both have a proven successful run, but given the discovery quality findings, worth holding off on scheduling `brewery-discover` specifically until either the `dryRun` flag or a narrower search query is in place, so future runs don't silently insert unreviewed bar listings on autopilot.
+1. *Resolve the Supabase `sb_secret_...` key issue* — **done 27 July.** Root cause was an incomplete `auth: "secret"` mode missing the required key name; fixed to `auth: "secret:brewery_sync_v2"` on both functions.
+2. *Successfully test `brewery-discover` end-to-end* — **done 27 July**, `{"found":20,"inserted":12,"skipped":8}`, followed by manual triage of all 12 new rows.
+3. **Add the `dryRun` flag to `brewery-discover`** — now a hard blocker on the national expansion rollout above, not just a nice-to-have for the next Wellington run.
+4. Resolve the query-narrowing and region-boundary questions in the National Expansion Plan above.
+5. Run the first regional dry run (Auckland or Canterbury) and validate the per-region workflow before treating it as repeatable.
+6. Register for the NZBN API and wire it into `brewery-sync`, upgrading closure detection to real two-source auto-close.
+7. Add the Anthropic description-generation step for newly-discovered breweries.
+8. Schedule both functions (`pg_cron` or Supabase's built-in cron) — now that both have a proven successful run, but given the discovery quality findings, worth holding off on scheduling `brewery-discover` specifically until either the `dryRun` flag or a narrower search query is in place.

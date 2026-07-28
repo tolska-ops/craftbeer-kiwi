@@ -6,6 +6,56 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ---
 
+## National expansion: region-by-region rollout, dry-run gate mandatory per region
+
+**Decided (28 July):** Expansion beyond Wellington will proceed region by region — not nationally in one pass — with a `dryRun` review-and-triage step mandatory before any region's discovery results go live. Phase order: Auckland and Canterbury first, then Waikato/Bay of Plenty/Otago, then remaining regions batched together. Full plan in `craftbeer-kiwi-automation-plan.md`.
+
+**Why:** `brewery-discover`'s first live run (27 July, Wellington) returned a roughly 50% false-positive rate — in a market Andy could personally sanity-check by eye. There's no reason for that error rate to be lower in an unfamiliar region, and no personal gut-check to catch it if it isn't.
+
+**Ruled out:** Running discovery nationally in one pass once `dryRun` exists — would produce one very large, hard-to-triage batch spanning regions Andy doesn't know well.
+
+**Dependency created:** Makes the `dryRun` flag a hard blocker on the whole rollout — see `craftbeer-kiwi-automation-plan.md`'s "what needs building next" list.
+
+---
+
+## Per-brewery theming rule extended to cover automated inserts
+
+**Decided:** The existing "every brewery needs an explicit `getBreweryTheme` entry" rule now explicitly covers breweries added by `brewery-discover`, not just manual adds. Theming becomes part of the planned `dryRun` review step: no automated row goes live without a theme entry assigned as part of the same manual review that catches bars/pubs and duplicates. Until `dryRun` exists, any live automated run needs a manual follow-up pass to add theme entries for whatever landed.
+
+**Why:** The original rule (below) was written with manual adds in mind, where touching the theme lookup is a natural part of adding a row. `brewery-discover`'s first live run (27 July) inserted 12 breweries with no equivalent checkpoint, so they went live untheme'd — confirming the rule as written had no step covering the automated path.
+
+**Ruled out (for now):** Adding a neutral fallback colour in `getBreweryTheme` so untheme'd pins render as generically "unthemed" rather than defaulting to whatever colour currently happens when no entry matches. Not dismissed, just not decided — this would partially reverse the original "no fallback" rule and deserves its own deliberate call rather than a quick patch.
+
+---
+
+## `brewery-discover` false positives: keep-and-filter (`venue_type`), not delete
+
+**Decided:** When `brewery-discover`'s first real run (27 July) returned 7 bars/pubs alongside genuine breweries, the fix was a new `venue_type` column (`'brewery'`/`'bar'`) plus a frontend query filter (`venue_type = 'brewery'`), rather than deleting the bar rows outright.
+
+**Why:** Keeping the rows preserves an audit trail of what discovery actually found, and prevents the same bars being silently re-discovered and re-inserted on every future run, since their `place_id` now already exists in the table.
+
+**Ruled out:** Hard-deleting the bar rows — matches the project's existing soft-delete philosophy, and would mean re-doing the same classification work every time discovery re-finds the same bars.
+
+---
+
+## Near-duplicate listings: `is_active = false`, not `venue_type`
+
+**Decided:** Garage Project Aro Taproom — a near-duplicate row for a brewery already in the directory, surfaced by the same 27 July run — was suppressed via `is_active = false` rather than reclassified via `venue_type`.
+
+**Why:** It's a genuine brewery-owned venue, not a bar — `venue_type = 'bar'` would misrepresent what it is. `is_active = false` correctly describes the actual problem: this row shouldn't display because it's a repeat of one already represented, not because it's the wrong kind of venue.
+
+**Ruled out:** Deleting the row (loses the record of the near-duplicate) or leaving it active (would show a redundant pin for a brewery already on the map).
+
+**Open problem, not resolved by this:** doesn't fix the underlying cause — Places assigning a different `place_id` to what's arguably the same brand's site — so this could recur on a future run and would again need a human to spot it.
+
+---
+
+## `dryRun` flag: still not built before `brewery-discover`'s first live run
+
+**Decided (by circumstance more than deliberate choice):** the first real `brewery-discover` test (27 July) ran directly against the live `breweries` table. A `dryRun` safety flag was discussed as far back as 20 July as worth adding before any real run, but hadn't been built when the Supabase key issue resolved and the first successful test became possible.
+
+**Why this matters going forward:** this run is now the concrete example of exactly the failure mode `dryRun` was meant to prevent. It remains a to-do, but with direct evidence attached — see the national expansion decision above, where it's promoted to a hard blocker.
+
 ## `venue_type` field: retain-and-flag, not delete, for non-brewery discoveries
 
 **Decided:** When `brewery-discover` picks up a venue that isn't actually a brewery (a bar/pub that pours craft beer, or a general venue caught by a broad search), don't delete the row. Add a `venue_type` text field (default `'brewery'`), set it to `'bar'` for these cases, and filter the frontend map query on `venue_type = 'brewery'` in addition to the existing `is_active = true`.
