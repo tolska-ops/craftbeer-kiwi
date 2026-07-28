@@ -8,9 +8,25 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
-## `includedType`/`strictTypeFiltering` tested and reverted — too unreliable for NZ brewery data
+## Regional dry-run pagination added — confirmed not the cause of the Thorndon/Petone gap
 
-**ID:** `DEC-022`
+**ID:** `DEC-023`
+
+**Decided:** Added pagination to `brewery-discover`'s Text Search calls, looping via `nextPageToken` up to `MAX_PAGES = 4` (up to 80 candidates per run instead of a hard 20). Kept, even though it turned out not to explain the specific gap that prompted it — genuinely useful for larger regions ahead of national expansion, particularly Auckland, where 20 results is a much more plausible real ceiling than it is for Wellington.
+
+**Why this was investigated:** A Nelson region dry run (28 July, part of testing ahead of the phased rollout) surfaced Sprig + Fern as a known national pub chain with multiple non-brewing locations — prompting a check of whether Sprig + Fern's own Wellington pubs (Thorndon, 342 Tinakori Road; Petone, 146 Jackson Street) were missing from Wellington's existing discovery results due to the same 20-result-per-request cap that (wrongly) seemed like the likely explanation at the time.
+
+**Finding: it wasn't a volume problem.** After deploying pagination and re-running the Wellington dry run, `found` stayed at exactly 20 — meaning Google's Text Search genuinely has no `nextPageToken` to offer for this query; there simply aren't more than 20 places Google considers relevant matches for `"brewery in Wellington, New Zealand"`. Thorndon and Petone aren't being cut off by a limit — they're not being returned at all, at any page.
+
+**Actual explanation:** the same pattern already identified in Nelson. Thorndon and Petone are marketed and reviewed everywhere as pubs/taverns that pour Sprig + Fern beer, not as breweries — Google's own relevance ranking for a "brewery" query correctly doesn't surface them, the same way `primaryType` correctly tags Nelson's non-Richmond Sprig + Fern locations as `pub`/`bar`. This isn't a `brewery-discover` defect; a pub serving a brand's beer isn't a brewery, and the tool is behaving correctly by not returning it. Getting these into the directory (if desired at all) is a manual/product decision, same as any other bar or pub venue — not something discovery should be expected to surface on its own.
+
+**Ruled out:** Treating the missing Wellington locations as a bug to keep chasing via query tuning — the pagination test was the right way to rule out the volume explanation definitively, and having done so, further tuning would be solving a problem that doesn't actually exist for Wellington specifically.
+
+**See also:** `DEC-022` (the `includedType`/`strictTypeFiltering` revert) and the Nelson dry-run findings — all three point to the same underlying lesson: Google's own place-type signals (whether `includedType` filtering or plain relevance ranking) reliably distinguish "brews beer" from "sells/pours beer under a brand name," which is exactly the distinction `craftbeer.kiwi` needs and shouldn't try to override.
+
+---
+
+
 
 **Decided:** Tried filtering `brewery-discover`'s Places Text Search using the new (Feb 2026) `brewery`/`brewpub` type categories — `includedType: "brewery"` with `strictTypeFiltering: true` — to cut bar/pub false positives at the API level instead of relying entirely on post-classification via `venue_type`. Reverted after testing via `dryRun`: kept `primaryType` in the field mask and `primary_type` as a stored column for triage reference, dropped `includedType` and `strictTypeFiltering` from the request entirely.
 

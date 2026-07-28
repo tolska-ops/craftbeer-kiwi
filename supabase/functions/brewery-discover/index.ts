@@ -9,21 +9,38 @@
 // What this does, each run:
 // 1. Text-searches Google Places for "brewery" biased to the
 //    Wellington region (soft bias, not a hard boundary — wide radius
-//    so outlying breweries like Kapiti Coast aren't missed).
-// 2. For each result, skips it if place_id already exists in the
+//    so outlying breweries like Kapiti Coast aren't missed). Query
+//    and location can be overridden via ?query=, ?lat=, ?lng=, and
+//    ?radius= for testing other regions ahead of the phased national
+//    rollout — Wellington remains the default if none are passed.
+// 2. Paginates through Places' Text Search results (?nextPageToken)
+//    up to MAX_PAGES pages, since a single request is hard-capped at
+//    20 results regardless of maxResultCount — confirmed 28 July when
+//    a real Wellington venue (Sprig + Fern, Thorndon and Petone) was
+//    found missing from a 20-result run even after raising
+//    maxResultCount to 100. Bounded rather than unlimited, to keep
+//    API cost and result volume sane for larger regions like Auckland.
+// 3. For each result, skips it if place_id already exists in the
 //    breweries table (dedup is by place_id, not name — this is what
 //    correctly handles multi-site brands like Garage Project having
 //    several venues, unlike name-based matching, which is the trap
 //    that missed Wild Workshop when checked manually on 17 July).
-// 3. Inserts genuinely new places with flagged_for_review = true.
+// 4. Inserts genuinely new places with flagged_for_review = true.
 //    This isn't optional polish — without it, a fresh auto-insert
 //    wouldn't actually surface in the exceptions report query from
 //    the automation plan (step 3b), since last_verified = now() on
 //    insert means the staleness clause wouldn't catch it either.
-// 4. description is left null — that's step 8 (Anthropic-generated
+// 5. description is left null — that's step 8 (Anthropic-generated
 //    descriptions), not built yet. website is populated from Places'
 //    websiteUri when available, left null otherwise — nothing to
 //    backfill if Places itself doesn't have one.
+//
+// ?dryRun=true returns wouldInsert/skippedNames without writing to
+// breweries — added 28 July after includedType/strictTypeFiltering
+// was tested and found unreliable for NZ brewery data (see
+// decisions.md DEC-022). primaryType is kept in the field mask and
+// stored as primary_type on insert, purely as triage metadata for
+// manual review — not used as a filter.
 //
 // Known limitation (not something this function can fix): Text
 // Search may not surface every site of a multi-venue brand in a
@@ -36,13 +53,20 @@ import { withSupabase } from "npm:@supabase/server";
 
 const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY")!;
 
-// Wellington CBD centre. Radius is generous (50km) since locationBias
-// is a soft hint, not a hard cutoff — wide enough to still catch
-// Kapiti Coast (e.g. Duncan's, Paraparaumu, ~50km out) without
-// excluding results further out entirely.
+// Wellington CBD centre — the default when no query-param override is
+// passed. Radius is generous (50km) since locationBias is a soft
+// hint, not a hard cutoff — wide enough to still catch Kapiti Coast
+// (e.g. Duncan's, Paraparaumu, ~50km out) without excluding results
+// further out entirely.
 const SEARCH_QUERY = "brewery in Wellington, New Zealand";
 const BIAS_CENTER = { latitude: -41.2865, longitude: 174.7762 };
 const BIAS_RADIUS_METERS = 50000;
+
+// Hard cap on pagination — bounds both API cost and result volume.
+// 4 pages x 20 results = up to 80 candidates per run, well beyond
+// what Wellington needed but sized with Auckland (a larger, phase-one
+// region) in mind without being unbounded.
+const MAX_PAGES = 4;
 
 const SEARCH_FIELD_MASK =
   "places.id,places.displayName,places.formattedAddress,places.location,places.websiteUri,places.businessStatus,places.primaryType";
@@ -59,12 +83,18 @@ interface PlaceResult {
 
 interface SearchTextResponse {
   places?: PlaceResult[];
+  nextPageToken?: string;
 }
 
 export default {
   fetch: withSupabase({ auth: "secret:brewery_sync_v2" }, async (req, ctx) => {
     const url = new URL(req.url);
     const dryRun = url.searchParams.get("dryRun") === "true";
+    const regionQuery = url.searchParams.get("query") ?? SEARCH_QUERY;
+    const lat = Number(url.searchParams.get("lat")) || BIAS_CENTER.latitude;
+    const lng = Number(url.searchParams.get("lng")) || BIAS_CENTER.longitude;
+    const radiusMeters = Number(url.searchParams.get("radius")) || BIAS_RADIUS_METERS;
+
     // Existing place_ids, so we can dedup without a query per result.
     const { data: existing, error: existingError } = await ctx.supabaseAdmin
       .from("breweries")
@@ -82,7 +112,7 @@ export default {
 
     let places: PlaceResult[];
     try {
-      places = await searchBreweries();
+      places = await searchBreweries(regionQuery, { latitude: lat, longitude: lng }, radiusMeters);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return Response.json({ error: `Places search failed: ${message}` }, { status: 502 });
@@ -97,10 +127,11 @@ export default {
       wouldInsert: [] as Record<string, unknown>[],
       errors: [] as { place: string; message: string }[],
     };
+
     for (const place of places) {
       if (existingIds.has(place.id)) {
         results.skipped++;
-        results.skippedNames?.push(place.displayName?.text ?? "Unknown"); // temporary, for diagnosis
+        results.skippedNames.push(place.displayName?.text ?? "Unknown");
         continue;
       }
 
@@ -141,31 +172,49 @@ export default {
   }),
 };
 
-async function searchBreweries(): Promise<PlaceResult[]> {
-  const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-      "X-Goog-FieldMask": SEARCH_FIELD_MASK,
-    },
-    body: JSON.stringify({
-      textQuery: SEARCH_QUERY,
-      maxResultCount: 20,
-      locationBias: {
-        circle: {
-          center: BIAS_CENTER,
-          radius: BIAS_RADIUS_METERS,
-        },
+async function searchBreweries(
+  query = SEARCH_QUERY,
+  center = BIAS_CENTER,
+  radiusMeters = BIAS_RADIUS_METERS,
+): Promise<PlaceResult[]> {
+  const allPlaces: PlaceResult[] = [];
+  let pageToken: string | undefined;
+  let page = 0;
+
+  do {
+    const body: Record<string, unknown> = pageToken
+      ? { textQuery: query, pageToken }
+      : {
+          textQuery: query,
+          maxResultCount: 20,
+          locationBias: {
+            circle: {
+              center,
+              radius: radiusMeters,
+            },
+          },
+        };
+
+    const response = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": SEARCH_FIELD_MASK,
       },
-    }),
-  });
+      body: JSON.stringify(body),
+    });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Places API ${response.status}: ${body}`);
-  }
+    if (!response.ok) {
+      const responseBody = await response.text();
+      throw new Error(`Places API ${response.status}: ${responseBody}`);
+    }
 
-  const data = (await response.json()) as SearchTextResponse;
-  return data.places ?? [];
+    const data = (await response.json()) as SearchTextResponse;
+    allPlaces.push(...(data.places ?? []));
+    pageToken = data.nextPageToken;
+    page++;
+  } while (pageToken && page < MAX_PAGES);
+
+  return allPlaces;
 }
