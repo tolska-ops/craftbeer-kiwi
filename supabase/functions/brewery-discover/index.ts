@@ -45,7 +45,7 @@ const BIAS_CENTER = { latitude: -41.2865, longitude: 174.7762 };
 const BIAS_RADIUS_METERS = 50000;
 
 const SEARCH_FIELD_MASK =
-  "places.id,places.displayName,places.formattedAddress,places.location,places.websiteUri,places.businessStatus";
+  "places.id,places.displayName,places.formattedAddress,places.location,places.websiteUri,places.businessStatus,places.primaryType";
 
 interface PlaceResult {
   id: string;
@@ -54,6 +54,7 @@ interface PlaceResult {
   location?: { latitude: number; longitude: number };
   websiteUri?: string;
   businessStatus?: string;
+  primaryType?: string;
 }
 
 interface SearchTextResponse {
@@ -61,7 +62,9 @@ interface SearchTextResponse {
 }
 
 export default {
-  fetch: withSupabase({ auth: "secret" }, async (_req, ctx) => {
+  fetch: withSupabase({ auth: "secret:brewery_sync_v2" }, async (req, ctx) => {
+    const url = new URL(req.url);
+    const dryRun = url.searchParams.get("dryRun") === "true";
     // Existing place_ids, so we can dedup without a query per result.
     const { data: existing, error: existingError } = await ctx.supabaseAdmin
       .from("breweries")
@@ -86,32 +89,42 @@ export default {
     }
 
     const results = {
+      dryRun,
       found: places.length,
       inserted: 0,
       skipped: 0,
+      skippedNames: [] as string[],
+      wouldInsert: [] as Record<string, unknown>[],
       errors: [] as { place: string; message: string }[],
     };
-
     for (const place of places) {
       if (existingIds.has(place.id)) {
         results.skipped++;
+        results.skippedNames?.push(place.displayName?.text ?? "Unknown"); // temporary, for diagnosis
         continue;
       }
 
       const name = place.displayName?.text ?? "Unknown";
+      const record = {
+        name,
+        address: place.formattedAddress ?? null,
+        latitude: place.location?.latitude ?? null,
+        longitude: place.location?.longitude ?? null,
+        website: place.websiteUri ?? null,
+        place_id: place.id,
+        primary_type: place.primaryType ?? null,
+        is_active: true,
+        last_verified: new Date().toISOString(),
+        flagged_for_review: true,
+      };
+
+      if (dryRun) {
+        results.wouldInsert.push(record);
+        continue;
+      }
 
       try {
-        const { error: insertError } = await ctx.supabaseAdmin.from("breweries").insert({
-          name,
-          address: place.formattedAddress ?? null,
-          latitude: place.location?.latitude ?? null,
-          longitude: place.location?.longitude ?? null,
-          website: place.websiteUri ?? null,
-          place_id: place.id,
-          is_active: true,
-          last_verified: new Date().toISOString(),
-          flagged_for_review: true,
-        });
+        const { error: insertError } = await ctx.supabaseAdmin.from("breweries").insert(record);
 
         if (insertError) {
           results.errors.push({ place: name, message: insertError.message });
