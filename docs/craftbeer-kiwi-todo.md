@@ -1,7 +1,7 @@
 # craftbeer.kiwi - To-Do List
 
-**Last updated:** 28 July 2026
-**Purpose:** Single source of truth for what's outstanding on the project, so this doesn't only live in session memory. Update this whenever something here gets done, or something new gets added - same standing-instruction treatment as the other living docs (architecture.md, craftbeer-kiwi-automation-plan.md, retrospective.md).
+**Last updated:** 29 July 2026 (added manual backup to-do)
+**Purpose:** Single source of truth for what's outstanding on the project, so this doesn't only live in session memory. Update this whenever something here gets done, or something new gets added - same standing-instruction treatment as the other living docs (`craftbeer-kiwi-architecture.md`, `craftbeer-kiwi-automation-plan.md`, `craftbeer-kiwi-retrospective.md`). Brewery count lives in `craftbeer-kiwi-readme.md` — don't restate it here.
 
 Status key: 🔴 Blocked · 🟡 In progress / recommended, not started · ⚪ Not started · ✅ Done (kept briefly for context, remove once stale)
 
@@ -12,6 +12,8 @@ Status key: 🔴 Blocked · 🟡 In progress / recommended, not started · ⚪ N
 - 🟡 **Mobile popup header-obscuring bug has come back.** Fixed 17 July (forced `Popup anchor="bottom"`) and confirmed on real iPhone 19 July - but the 21 July theme-dropdown addition made the header taller, and the popup title now slides up under the header again on pin tap (confirmed via screenshots, 27 July). Likely fix: base the popup/map-container offset on the header's actual current height (e.g. `ref.current.offsetHeight`) rather than the value hardcoded before the dropdown existed. Needs a desktop session to view/edit `App.jsx`.
 
 ## In progress / recommended, not yet actioned
+
+- 🟡 **Take a manual database backup.** Confirmed 29 July: Supabase Free tier has no automated backups or PITR — a deleted project (not just a paused one) is unrecoverable. Mitigation is a manual `supabase db dump` export, saved into the existing FreeFileSync-backed local folder. No automation needed at 23 breweries — see `craftbeer-kiwi-security.md` "Data backups" for the command and trigger cadence. Worth doing once now as a baseline.
 
 - 🟡 **Add real `getBreweryTheme` entries for the 4 breweries added via `brewery-discover` (27 July).** Three Sisters, Double Vision - DUB HUB Island Bay, Panhead Tory Street, and Waitoa Victoria St. Draft theme entries were prepared and committed to `App.jsx`, but this needs a verification pass to confirm they're real, correct entries and not placeholders. Now backed by a structural safeguard either way: the `is_published` check constraint (added 28 July, see `craftbeer-kiwi-decisions.md`) makes it impossible for a brewery row to be published without `has_theme = true`, so a missing entry will show up in the exceptions report rather than silently going live.
 - 🟡 **Clear stale `flagged_for_review` flags** on the 4 confirmed breweries from the 27 July discovery run, now that they're verified. Also worth deciding whether to clear it on Garage Project Aro Taproom (already suppressed via `is_active = false`).

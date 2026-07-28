@@ -1,5 +1,8 @@
 # craftbeer.kiwi
 
+**Last updated:** 29 July 2026
+**Note:** This is the single source of truth for the current brewery count and live status — other docs (todo.md, automation-plan.md, retrospective.md) should reference this file rather than restate the count.
+
 An interactive directory and map of Wellington-region craft breweries, with plans for brewery-trail check-ins and gamified badges.
 
 **Live site:** [craftbeer.kiwi](https://craftbeer.kiwi) (also reachable via [craftbeer-kiwi.vercel.app](https://craftbeer-kiwi.vercel.app))
@@ -24,7 +27,7 @@ Planned next: automated brewery discovery/closure detection, user check-ins, dig
 | Hosting | Vercel (Hobby plan) |
 | Source control | GitHub (`tolska-ops/craftbeer-kiwi`) |
 
-See [`docs/architecture.md`](./docs/architecture.md) for how these pieces fit together.
+See `craftbeer-kiwi-architecture.md` for how these pieces fit together.
 
 ## Running locally
 
@@ -58,12 +61,15 @@ Connected to Vercel via GitHub — pushing to `main` triggers an automatic redep
 
 ## Documentation
 
-- [`docs/architecture.md`](./docs/architecture.md) — how the pieces fit together, data flow
-- [`docs/schema.md`](./docs/schema.md) — database schema reference *(to be written)*
-- [`docs/decisions.md`](./docs/decisions.md) — key technical/product decisions and why
-- [`docs/craftbeer-kiwi-automation-plan.md`](./docs/craftbeer-kiwi-automation-plan.md) — plan for automated brewery discovery and closure detection
-- [`docs/retrospective.md`](./docs/retrospective.md) — project retrospective, session-by-session
-- [`docs/todo.md`](./docs/todo.md) — outstanding work, single source of truth
+All craftbeer-kiwi-*.md files live together in one folder (`C:\craftbeer-kiwi\docs` locally; mirrored in project knowledge) — no nested subfolders.
+
+- `craftbeer-kiwi-architecture.md` — how the pieces fit together, data flow
+- `craftbeer-kiwi-decisions.md` — key technical/product decisions and why (canonical record for anything logged with a DEC-XXX ID)
+- `craftbeer-kiwi-automation-plan.md` — plan and current status for automated brewery discovery and closure detection
+- `craftbeer-kiwi-retrospective.md` — project retrospective, session-by-session
+- `craftbeer-kiwi-todo.md` — outstanding work, single source of truth for what's left to do
+- `craftbeer-kiwi-security.md` — security audit log and standing checklist
+- `craftbeer-kiwi-concept-*.md` — one-page reference explainers on specific concepts (cron, Google Places, etc.), indexed in `craftbeer-kiwi-concepts-index.md`
 
 ## Status
 
