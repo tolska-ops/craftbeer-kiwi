@@ -121,7 +121,7 @@ const theme = THEMES[themeId];
 
   useEffect(() => {
     async function fetchBreweries() {
-      const { data, error } = await supabase.from('breweries').select('*').eq('is_active', true).eq('venue_type', 'brewery')
+      const { data, error } = await supabase.from('breweries').select('*').eq('is_active', true).eq('venue_type', 'brewery').eq('is_published', true)
       if (error) {
         setError(error.message)
       } else {
