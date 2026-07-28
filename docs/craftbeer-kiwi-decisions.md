@@ -4,9 +4,84 @@ A running record of significant technical and product decisions, why they were m
 
 Format: newest first. Each entry — what was decided, why, what else was considered.
 
+Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronological order — the oldest decision is `DEC-001`, regardless of where it sits in the newest-first list below. New entries get the next unused number when added, so IDs stay stable references even as the file grows.
+
+---
+
+## `includedType`/`strictTypeFiltering` tested and reverted — too unreliable for NZ brewery data
+
+**ID:** `DEC-022`
+
+**Decided:** Tried filtering `brewery-discover`'s Places Text Search using the new (Feb 2026) `brewery`/`brewpub` type categories — `includedType: "brewery"` with `strictTypeFiltering: true` — to cut bar/pub false positives at the API level instead of relying entirely on post-classification via `venue_type`. Reverted after testing via `dryRun`: kept `primaryType` in the field mask and `primary_type` as a stored column for triage reference, dropped `includedType` and `strictTypeFiltering` from the request entirely.
+
+**Why reverted:** `strictTypeFiltering: true` returned only 8 results against Wellington, of which every single one was either a known bar/pub with "Brewery"/"Brewer" in its own venue name (Fork and Brewer, Heyday Brewery & Bar, Parrotdog Brewery & Bar) or a Garage Project taproom variant — and **15 of the 23 known breweries in the table didn't come back at all**, including straightforward, unambiguous ones like Panhead, Boneface, and Three Sisters. Removing just `strictTypeFiltering` and keeping `includedType: "brewery"` alone produced an identical result, confirming the problem was `includedType` itself, not strict mode specifically. Removing `includedType` entirely restored the original broad-query behaviour (`found: 20`, matching the shape of the 27 July run).
+
+**Conclusion:** Google's `brewery`/`brewpub` type categories are too new and too unevenly applied to NZ listings to use as a filter — false negatives (a real brewery silently never appearing) are a worse failure mode than false positives (a bar appearing and needing manual exclusion), since a missed brewery never surfaces for review at all.
+
+**Kept anyway:** `places.primaryType` in the field mask, and a new `primary_type` column on `breweries` (added 28 July, both DEV and prod), populated from Google's classification on every discovered candidate — not used as a filter, but genuinely useful as triage metadata. Proved its worth immediately: the first candidate found after reverting, "Teddy's Tacos: Taproom & Taqueria," carried `primary_type: "restaurant"` — a taproom serving craft beer, not a brewery, correctly left in `dryRun` output rather than the live table, exactly as designed.
+
+**Also delivered from this session:** the `dryRun` flag itself — `brewery-discover` now accepts `?dryRun=true`, returning `wouldInsert`/`skippedNames` without writing to `breweries`. This was the mechanism that let the `strictTypeFiltering` problem get caught and disproven before it ever touched live data, rather than repeating the 27 July pattern of finding out after the fact.
+
+**Ruled out:** Keeping `strictTypeFiltering` with a narrower/different query string — not investigated further once the false-negative rate against known breweries made the whole approach look structurally unreliable rather than just mistuned.
+
+---
+
+## NZBN backfill: findings from the full 23-brewery pass
+
+**ID:** `DEC-021`
+
+**Decided:** Manually looked up and recorded NZBN + registered legal name for all 23 breweries (bars excluded — scope is `venue_type = 'brewery'` only), rather than automating the search-and-match step now. Confirms the earlier open question in `craftbeer-kiwi-automation-plan.md`: manual lookup during a one-off pass was the right call at this volume — automation would have needed to solve every ambiguous case below algorithmically, which wasn't close to justified by the effort.
+
+**Why manual, not automated:** As anticipated, registered legal names routinely diverge from trading names (Heyday Beer Co / Has Beer Limited, Mean Doses / K&D Sessions Limited, Choice Bros / Choice Bros Brewing Wellington Limited), and several searches returned multiple plausible candidates requiring judgment — industry classification, registered address, registration date, and cross-referencing the brewery's own web presence, not a single deterministic signal. This is exactly the fuzzy-matching problem flagged when the open question was logged; nothing here suggests it would have been solvable by a simple automated name search.
+
+**Findings on the multi-site-NZBN theory (the original motivation for adding the column):**
+- **Confirmed working, twice:** Waitoa (Hataitai + Victoria St) and Double Vision (Miramar + DUB HUB Island Bay) both resolved to a single NZBN across their two rows — genuine, positive evidence the signal can work for catching multi-site brands.
+- **Complicated by corporate ownership, twice:** Panhead (both sites) and Tuatara both resolved to major-multinational parent entities — Lion NZ Limited (Kirin-owned) and DB Breweries Limited (Heineken-owned) respectively — rather than a brand-specific entity. Both are correct matches, but the shared-NZBN signal here means "same corporate owner," not "same trading brand," and DB Breweries Limited in particular would give a false-positive multi-site match against *any* other DB-owned brand, not just Tuatara. The theory only holds when the shared entity is the brand itself, not when it's a conglomerate parent.
+- **Unresolved:** Garage Project (Aro Street, Leeds Street, Wild Workshop) — traced to a real corporate structure (Brewwell Holdings Limited, industry-coded Breweries, registered at the Aro Street address, itself the parent of at least one subsidiary, Garage Project Pavilion Limited) but the actual operating entity is very likely a sibling "Brewwell Limited" that wasn't confirmed. All three rows left `nzbn` blank and `on_watchlist = true` rather than guessing.
+- **Net assessment:** the multi-site signal is real but not universal — worth using as one input for future duplicate/multi-site detection, never as the sole or automatic trigger.
+
+**Other findings, not part of the original goal but surfaced along the way:**
+- **Boneface** — NZBN shows "In Liquidation." Given a known prior ownership change already logged for this brewery, this may reflect a superseded pre-change entity rather than current status. Watchlisted, not treated as a closure signal.
+- **Heyday** — NZBN entity (Has Beer Limited) matches on address/website but predates the acquisition by Abandoned already noted in this brewery's own description. Watchlisted as an ownership-currency question, not a data error.
+- **Rocky Knob Brewing** — Te Aro Brewing Company Limited's NZBN record lists this as an additional trading name, but Rocky Knob is a real, separate, Tauranga-based brand (confirmed via web search, independently listed by the Brewers Guild), and its own domain no longer resolves to a brewery. Reads as stale or administrative registry data, not a hidden Wellington presence — not actioned.
+- **Garage Project Pavilion Limited** — surfaced as a Brewwell Holdings subsidiary during the Garage Project search, registered 24 March 2026 at the Aro Street address, industry-classified "Bar - licensed." Reads as a new licensing entity for a space at the existing site (a beer garden/event area, going by the name) rather than a fourth physical location — not added to the directory.
+- **Two breweries are corporately owned by international brewers while retaining independent branding** (Panhead/Lion/Kirin, Tuatara/DB/Heineken) — noted here as a factual finding; whether `craftbeer.kiwi`'s "craft" framing should treat this differently is a separate, not-yet-decided product question.
+
+**Ruled out:** Guessing on any ambiguous match rather than recording it as unresolved — the entire value of `nzbn` depends on it meaning "confirmed," not "best guess," especially given the multi-site use case would be actively harmful if built on wrong data.
+
+---
+
+## Internal watchlist flag: separate from `status` and `flagged_for_review`
+
+**ID:** `DEC-020`
+
+**Decided:** Added `on_watchlist` (boolean, default `false`) and `watchlist_note` (text, nullable) — an internal-only pair, never surfaced on the public map, for unconfirmed signals worth a human's attention but not yet actionable.
+
+**Why:** Prompted directly by looking up Boneface's NZBN and finding it shows "In Liquidation" — a genuine legal-register fact, but one of uncertain relevance, since the entity may predate a known ownership change (Boneface's ownership change is already logged as an early data correction). Neither existing field fit: `status`/`status_note` is for *confirmed* temporary closures the project is comfortable showing publicly (grey pin, badge, popup note) — showing "In Liquidation" next to a brewery that's still actively trading would be actively misleading, not just premature. `flagged_for_review` is close in spirit, but it's specifically scoped to the automated two-source-agreement closure logic — overloading it with an unrelated manual-research signal would blur what it means when it's set.
+
+**Ruled out:** Reusing `flagged_for_review` for this — would conflate two different kinds of "needs a human look": automated source-disagreement (which already has defined semantics tied to `brewery-sync`) versus an ad-hoc manual finding with no fixed trigger. Naming it `nzbn_watchlist` or similarly specific — kept generic instead, since the same "worth watching, not yet actionable" shape will likely apply to other future signals (a stale website, a spotted-in-passing closure sign) beyond just NZBN status.
+
+**First use:** Boneface Brewing Co flagged 28 July, NZBN `9429042455080` recorded alongside the note, pending confirmation of whether the liquidation status reflects the current trading entity.
+
+---
+
+## `is_published` flag + `theme_required_to_publish` constraint
+
+**ID:** `DEC-019`
+
+**Decided:** Added `is_published` (boolean, `not null default true`) as a dedicated publish gate, plus a check constraint — `check (not is_published or has_theme or venue_type != 'brewery')` — that makes it structurally impossible to publish a brewery row without an explicit `getBreweryTheme` entry. A companion `has_theme` boolean tracks whether that entry exists.
+
+**Why:** The existing "every brewery needs an explicit theme" rule (see below) had no actual enforcement point for automated inserts — `brewery-discover`'s first live run put 12 untheme'd rows straight onto the live map. Rather than relying on remembering to check the exceptions report every time, the constraint makes the gap impossible to create by accident. `is_published` is deliberately separate from both existing lifecycle flags: `is_active` describes permanent closure, not publish-readiness, and `flagged_for_review` (per the two-source-agreement rule) is meant to leave a brewery *visible* while under review — reusing either for "not yet ready to show" would break that existing semantics.
+
+**Ruled out:** A neutral fallback colour in `getBreweryTheme` so untheme'd pins render generically rather than blocking publish — partially reverses the original "no fallback" rule and deserves its own deliberate call rather than folding into this one. Relying on the exceptions report alone (no constraint) — the report only helps if someone actually checks it before every publish; the constraint holds regardless.
+
+**Rollout note:** All 23 existing breweries defaulted to `is_published = true` on migration (verified zero constraint violations before the constraint was added), so nothing changed on the live map. New automated inserts are expected to land `is_published = false` until triaged and themed — this is now the actual enforcement mechanism behind the per-brewery theming rule extended to automated inserts (see below).
+
 ---
 
 ## National expansion: region-by-region rollout, dry-run gate mandatory per region
+
+**ID:** `DEC-018`
 
 **Decided (28 July):** Expansion beyond Wellington will proceed region by region — not nationally in one pass — with a `dryRun` review-and-triage step mandatory before any region's discovery results go live. Phase order: Auckland and Canterbury first, then Waikato/Bay of Plenty/Otago, then remaining regions batched together. Full plan in `craftbeer-kiwi-automation-plan.md`.
 
@@ -20,6 +95,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Per-brewery theming rule extended to cover automated inserts
 
+**ID:** `DEC-017`
+
 **Decided:** The existing "every brewery needs an explicit `getBreweryTheme` entry" rule now explicitly covers breweries added by `brewery-discover`, not just manual adds. Theming becomes part of the planned `dryRun` review step: no automated row goes live without a theme entry assigned as part of the same manual review that catches bars/pubs and duplicates. Until `dryRun` exists, any live automated run needs a manual follow-up pass to add theme entries for whatever landed.
 
 **Why:** The original rule (below) was written with manual adds in mind, where touching the theme lookup is a natural part of adding a row. `brewery-discover`'s first live run (27 July) inserted 12 breweries with no equivalent checkpoint, so they went live untheme'd — confirming the rule as written had no step covering the automated path.
@@ -30,6 +107,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## `brewery-discover` false positives: keep-and-filter (`venue_type`), not delete
 
+**ID:** `DEC-016`
+
 **Decided:** When `brewery-discover`'s first real run (27 July) returned 7 bars/pubs alongside genuine breweries, the fix was a new `venue_type` column (`'brewery'`/`'bar'`) plus a frontend query filter (`venue_type = 'brewery'`), rather than deleting the bar rows outright.
 
 **Why:** Keeping the rows preserves an audit trail of what discovery actually found, and prevents the same bars being silently re-discovered and re-inserted on every future run, since their `place_id` now already exists in the table.
@@ -39,6 +118,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 ---
 
 ## Near-duplicate listings: `is_active = false`, not `venue_type`
+
+**ID:** `DEC-015`
 
 **Decided:** Garage Project Aro Taproom — a near-duplicate row for a brewery already in the directory, surfaced by the same 27 July run — was suppressed via `is_active = false` rather than reclassified via `venue_type`.
 
@@ -52,11 +133,19 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## `dryRun` flag: still not built before `brewery-discover`'s first live run
 
+**ID:** `DEC-014`
+
 **Decided (by circumstance more than deliberate choice):** the first real `brewery-discover` test (27 July) ran directly against the live `breweries` table. A `dryRun` safety flag was discussed as far back as 20 July as worth adding before any real run, but hadn't been built when the Supabase key issue resolved and the first successful test became possible.
 
 **Why this matters going forward:** this run is now the concrete example of exactly the failure mode `dryRun` was meant to prevent. It remains a to-do, but with direct evidence attached — see the national expansion decision above, where it's promoted to a hard blocker.
 
+**Update (28 July):** built. See `DEC-022` above for the `dryRun` implementation and its first real use, catching the `strictTypeFiltering` problem before it touched live data.
+
+---
+
 ## `venue_type` field: retain-and-flag, not delete, for non-brewery discoveries
+
+**ID:** `DEC-013`
 
 **Decided:** When `brewery-discover` picks up a venue that isn't actually a brewery (a bar/pub that pours craft beer, or a general venue caught by a broad search), don't delete the row. Add a `venue_type` text field (default `'brewery'`), set it to `'bar'` for these cases, and filter the frontend map query on `venue_type = 'brewery'` in addition to the existing `is_active = true`.
 
@@ -70,6 +159,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Edge Function secret-key auth: named keys are required, not optional
 
+**ID:** `DEC-012`
+
 **Decided (root cause, not really a "decision" — a bug fix):** `@supabase/server`'s secret-key auth mode must be written as `auth: "secret:<name>"`, where `<name>` matches the label given to the key in Supabase's dashboard (Settings → API Keys). Both `brewery-sync` and `brewery-discover` were originally written with just `auth: "secret"` — no name — which the SDK can't resolve to any actual key, so it correctly (if unhelpfully) rejected every request with a generic "invalid credentials" 401, regardless of which valid `sb_secret_...` key was sent.
 
 **Why this took a week to find:** the error message ("Invalid credentials" / `INVALID_CREDENTIALS`) looked identical whether the problem was a wrong key, a missing header, or (the actual cause) a missing key-name in the auth config — there was no signal pointing specifically at the code's own auth mode being incomplete. Ruled out along the way, in order: the Supabase platform's separate legacy `verify_jwt` gateway check (already correctly disabled); sending the key in the wrong header (`Authorization` instead of `apikey` — a real, documented common mistake, but not what was happening here); a stale/rotated key mismatch (ruled out once a second, freshly-generated key produced the identical error). The actual fix was found by reading Supabase's own "Securing Edge Functions" documentation in full, specifically the table describing `@supabase/server`'s auth modes — it explicitly requires `'secret:<name>'`, not bare `'secret'`.
@@ -82,6 +173,7 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Documentation process: proactive tracking over ad-hoc updates
 
+**ID:** `DEC-011`
 
 **Decided:** Formalised how the living docs (README, architecture, automation-plan, retrospective, decisions) get maintained: proactively prompt to update the relevant doc(s) whenever a session involves a schema change, architecture change, major feature, or significant decision — rather than waiting to be asked. Added alongside this: in-session mismatch flagging (raise it the moment something contradicts an uploaded doc, not just at the end), a "pending re-upload" log so a doc regenerated for download isn't wrongly assumed to have made it back into project knowledge, an end-of-session git status/unpushed-work check, and a prompt to regenerate any committed doc as a PDF for Andy's Dropbox folder.
 
@@ -93,6 +185,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Map theming: `themeId` + registry, not a dark-mode boolean
 
+**ID:** `DEC-010`
+
 **Decided:** Replace the earlier `darkMode` boolean with a `themeId` string and a `THEMES` registry object (accent colour, header background/text, Mapbox `mapStyle` URL per theme), selected via a `<select>` dropdown in the header.
 
 **Why:** A boolean only scales to two states. The product direction (playful, brand-driven map themes — Dive Bar, Hop Explosion — beyond just light/dark) needed an extensible structure from the start rather than a rewrite later.
@@ -102,6 +196,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 ---
 
 ## Domain: A record, not nameserver switch
+
+**ID:** `DEC-009`
 
 **Decided:** Point `craftbeer.kiwi` at Vercel via an A record at host `@`, not by switching nameservers to Vercel.
 
@@ -114,6 +210,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 ---
 
 ## Dev/prod environments: Option B, not Option C
+
+**ID:** `DEC-008`
 
 **Decided:** Use two separate free-tier Supabase projects (dev + prod) with environment-based config (`.env.local` for dev, Vercel dashboard env vars for prod), rather than Supabase's native database branching.
 
@@ -129,6 +227,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Favourites/trails: anonymous device ID, not user accounts
 
+**ID:** `DEC-007`
+
 **Decided:** No login system. Browser generates a random ID via `crypto.randomUUID()`, stored in `localStorage`; a `trails` table in Supabase keys off that ID, with a scheduled Edge Function deleting rows older than 7 days. Sharing a trail generates a separate public share-code rather than exposing the private device ID.
 
 **Why:** Avoids handling any PII (no email/password) and avoids building an auth system for a feature that doesn't need identity, just persistence.
@@ -139,6 +239,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Edge Functions: `brewery-sync` and `brewery-discover` kept separate
 
+**ID:** `DEC-006`
+
 **Decided:** Closure-check logic (`brewery-sync`) and discovery logic (`brewery-discover`) are two distinct Edge Functions, not one combined function.
 
 **Why:** Different cost-tier exposure and different failure blast radius. A bug in discovery (which writes new rows) is a different risk profile from a bug in closure-checking (which flags/closes existing rows) — keeping them separate limits how much damage either can do on its own, and lets each be rate-limited, monitored, or paused independently.
@@ -146,6 +248,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 ---
 
 ## Closure detection: two-source agreement required before auto-close
+
+**ID:** `DEC-005`
 
 **Decided:** `is_active` only flips to `false` automatically when **both** Google Places API and NZBN agree a brewery is closed. A single Places signal alone writes to `flagged_for_review` instead, for manual confirmation.
 
@@ -157,6 +261,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Soft delete over hard delete
 
+**ID:** `DEC-004`
+
 **Decided:** Breweries are marked inactive via an `is_active` boolean, never actually deleted from the table.
 
 **Why:** Reversibility. A brewery flagged closed in error (or one that reopens) can be flipped back with a single update — a hard delete would need a full re-add, including re-verifying `website`, `place_id`, coordinates, and theming.
@@ -164,6 +270,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 ---
 
 ## Every brewery needs a `website` field and an explicit theme
+
+**ID:** `DEC-003`
 
 **Decided:** Two standing data-quality rules: (1) `website` must never be null — check and populate on every manual add, enforce in future automation; (2) every brewery must have an explicit entry in `getBreweryTheme`, reflecting its own branding — never falls back to default orange.
 
@@ -173,6 +281,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 
 ## Temporary closures are a manual-entry feature, not automatable
 
+**ID:** `DEC-002`
+
 **Decided:** `status` / `status_note` fields (grey pin + badge + popup note) handle temporary closures, kept distinct from `is_active` (permanently gone) and `flagged_for_review` (source disagreement). Temporary closures are entered manually, not auto-detected.
 
 **Why:** A brewery's own website won't reliably announce a temporary closure (confirmed by the Emporium Brewing/Kaikōura flood case) — there's no automatable signal to detect "closed for now" versus "closed for good," so it has to stay a manual call.
@@ -180,6 +290,8 @@ Format: newest first. Each entry — what was decided, why, what else was consid
 ---
 
 ## Discovery misses multi-site brands — regional tourism pages fill the gap
+
+**ID:** `DEC-001`
 
 **Finding, not yet a fix:** Name-based discovery (Places API, excise list, Brewers Guild) treats multiple venues under one brand name as duplicates, so a second site for an existing brand gets silently skipped. Regional tourism board pages surface multi-site brands more reliably than name-matching does.
 
