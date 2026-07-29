@@ -1,4 +1,4 @@
-﻿// supabase/functions/brewery-discover/index.ts
+// supabase/functions/brewery-discover/index.ts
 //
 // Step 7 of the automation plan: discovery logic only.
 // Deliberately kept separate from brewery-sync (closure-check) —
@@ -35,12 +35,15 @@
 //    websiteUri when available, left null otherwise — nothing to
 //    backfill if Places itself doesn't have one.
 //
-// ?dryRun=true returns wouldInsert/skippedNames without writing to
-// breweries — added 28 July after includedType/strictTypeFiltering
-// was tested and found unreliable for NZ brewery data (see
-// decisions.md DEC-022). primaryType is kept in the field mask and
-// stored as primary_type on insert, purely as triage metadata for
-// manual review — not used as a filter.
+// 6. Dry-run is the default (safe) — pass ?live=true to force a real write
+//    to breweries. This reverses the original opt-in design: after the
+//    27 July live run showed how much manual triage bars/duplicates
+//    needed, dry-run became the hard-blocking default rather than an
+//    optional flag (see decisions.md DEC-014/DEC-018). primaryType is
+//     kept in the field mask and stored as primary_type on insert, purely
+//     as triage metadata for manual review — not used as a filter (the
+//     includedType/strictTypeFiltering approach was tried and reverted;
+//     see decisions.md DEC-022).
 //
 // Known limitation (not something this function can fix): Text
 // Search may not surface every site of a multi-venue brand in a
@@ -89,7 +92,8 @@ interface SearchTextResponse {
 export default {
   fetch: withSupabase({ auth: "secret:brewery_sync_v2" }, async (req, ctx) => {
     const url = new URL(req.url);
-    const dryRun = url.searchParams.get("dryRun") === "true";
+    const forceLive = url.searchParams.get("live") === "true";
+    const dryRun = !forceLive;
     const regionQuery = url.searchParams.get("query") ?? SEARCH_QUERY;
     const lat = Number(url.searchParams.get("lat")) || BIAS_CENTER.latitude;
     const lng = Number(url.searchParams.get("lng")) || BIAS_CENTER.longitude;

@@ -2,9 +2,9 @@
 
 **Purpose:** Tracks security audits, the standing checklist run at each audit, and risks knowingly accepted rather than fixed. Companion to `craftbeer-kiwi-architecture.md` (system design) and `craftbeer-kiwi-decisions.md` (why things are built the way they are) — this doc is specifically the security lens on the same system.
 
-**Status:** Skeleton only — no audit has been run yet. First audit outstanding (see `craftbeer-kiwi-todo.md`).
+**Status:** First audit complete (29 July) — two findings, both fixed and verified same session. Next audit: trigger-based (see below), or ~2–3 months.
 
-**Last updated:** 29 July 2026 (added manual backup/PITR guidance)
+**Last updated:** 29 July 2026 (first audit completed — legacy service_role key disabled, brewery-discover dry-run-by-default gap found and fixed)
 
 **Framework alignment:** [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/) Level 1, plus NZ legal requirements (Privacy Act 2020). See "Framework & compliance context" below for why.
 
@@ -36,7 +36,42 @@
 
 ## Audit log
 
+### First audit — 29 July 2026
+
+**Scope:** Full standing checklist, manual walkthrough (Supabase dashboard + GitHub), guided by Claude since the Supabase MCP connector's tools weren't loadable in-session.
+**Reviewed by:** Claude + Andy, via Supabase dashboard (Policies, Data API settings, API Keys, Edge Functions) and GitHub.
+
+**Findings:**
+| Area | Finding | Severity | Action |
+|---|---|---|---|
+| Access control | `breweries` RLS: one public SELECT-only policy, no write access. `check_ins`: RLS enabled, zero policies, API access disabled entirely. | — | Pass, no action |
+| API exposure | Only `breweries` exposed via Data API (1 of 2 tables). "Automatically expose new tables" is OFF — new tables won't be silently API-exposed by default. | — | Pass, no action. Worth adding as a permanent checklist item (not previously listed). |
+| Credentials | Publishable + named secret key (`brewery_sync_v2`) only, matching both Edge Functions. | — | Pass, no action |
+| **Credentials — legacy keys** | **Legacy `service_role` key (bypasses RLS entirely) was still active, unused by any code but live.** | **Medium** | **Fixed 29 July — disabled via "Disable JWT-based API keys."** |
+| **Edge Functions — `brewery-discover`** | **The 28 July "dry-run should be the default" decision had not actually shipped. Code still read `dryRun = url.searchParams.get("dryRun") === "true"` — opt-in, not opt-out. A plain/unparameterised call would have written directly to the live table.** | **Medium-High** | **Fixed 29 July — changed to `forceLive`/`!forceLive` pattern (dry-run now the default, `?live=true` forces a write). Deployed and verified: test call with no params returned `dryRun: true, inserted: 0`, correctly found 1 new candidate (Teddy's Tacos) in `wouldInsert` without writing it.** |
+| 2FA | Not re-verified this audit — carried forward, confirm next audit. | — | Open |
+| GitHub secret scan | Not completed this audit — carried forward. | — | Open |
+
+**Summary:** First audit surfaced two real, fixable gaps — an orphaned RLS-bypassing legacy key, and a documented safety decision (dry-run-by-default) that never actually made it into deployed code. Both fixed and verified same session. Net posture: significantly improved, and confirms the value of verifying against live config rather than trusting docs alone — the `dryRun` gap had sat undetected through several prior "done" markers in `todo.md`/`decisions.md` because those only recorded the *decision*, not a check of the *deployed code*.
+
+---
+
 ### [Template — copy for each new audit]
+
+**Date:**
+**Scope:** (e.g. full checklist / RLS only / pre-domain-launch review)
+**Reviewed by:** Claude + Andy, via [Supabase MCP / GitHub / manual]
+
+**Findings:**
+| Area | Finding | Severity | Action |
+|---|---|---|---|
+| | | | |
+
+**Summary:** One or two lines — net posture change, anything urgent.
+
+---
+
+
 
 **Date:**
 **Scope:** (e.g. full checklist / RLS only / pre-domain-launch review)
@@ -70,7 +105,7 @@ Organised loosely around **OWASP ASVS Level 1** chapters (Access Control, Authen
 - [ ] No API keys, secrets, or tokens committed to GitHub (spot-check recent commits, not just `.env` presence)
 - [ ] Publishable key only ever appears in frontend code; secret key never appears in frontend code, logs, or response bodies
 - [ ] `.env.local` / Vercel env vars correctly scoped (dev points at DEV project, prod points at prod — confirm no cross-wiring)
-- [ ] `brewery-discover` remains dry-run-by-default (per 28 July decision) — confirm this hasn't regressed
+- [x] `brewery-discover` remains dry-run-by-default (per 28 July decision) — **confirmed fixed and verified 29 July**; was previously not actually implemented despite being marked as a decision
 - [ ] 2FA still active on GitHub, Supabase, Vercel
 - [ ] Google Cloud project (`craftbeer-kiwi-automation`) API keys scoped to only what's needed (Places API etc.), not broad project-level access
 - [ ] Rate limiting / abuse protection considered for any function reachable without auth
@@ -137,6 +172,7 @@ Save the resulting `.sql` file into the same locally-backed-up folder structure 
 
 ## Open items
 
-- First audit not yet run — outstanding.
+- First audit complete (29 July) — see Audit log above. Next audit trigger-based (schema change, or ~2–3 months).
+- 2FA and GitHub secret-scan checklist items not re-verified this audit — confirm at next audit.
 - Once first audit completes, review whether this checklist needs sections added (e.g. once auth or payments exist).
 - No action needed now, but flag for a future check: NZISM only becomes relevant if this project ever touches government/critical-infrastructure work — not expected, noted here so it isn't rediscovered as a question later.

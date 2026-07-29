@@ -8,6 +8,24 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
+## First security audit: legacy Supabase key disabled, `dryRun` default gap found and fixed
+
+**ID:** `DEC-024`
+
+**Decided:** Ran the first formal security audit (29 July) against the standing checklist in `craftbeer-kiwi-security.md`. Two real findings, both fixed and verified same session:
+
+1. **Legacy `service_role` API key was still active.** This key bypasses RLS entirely and wasn't referenced anywhere in the current codebase (migration to the named `brewery_sync_v2` secret key happened 27 July, see `DEC-012`), but remained live and valid — an unused credential with maximum privilege. Disabled via Supabase's "Disable JWT-based API keys."
+
+2. **`brewery-discover`'s dry-run-by-default decision (`DEC-014`) had never actually shipped.** `DEC-014` was marked "Update (28 July): built," but that referred to the *opt-in* `dryRun` flag from `DEC-022`, not the separate 28 July decision that dry-run should be the *default* unless a parameter forces a live run. The deployed code still read `const dryRun = url.searchParams.get("dryRun") === "true"` — opt-in, not opt-out. A plain, unparameterised call to the function would have written directly to `breweries`. Fixed to `const forceLive = url.searchParams.get("live") === "true"; const dryRun = !forceLive;`, deployed, and verified: a test call with no parameters returned `dryRun: true, inserted: 0`, correctly surfacing one new candidate in `wouldInsert` without writing it.
+
+**Why this matters beyond the two fixes themselves:** this is a concrete example of doc/reality drift surviving multiple "done" markers — `DEC-014`, `automation-plan.md`, and `todo.md` had all recorded the dry-run-default decision as settled, but none of them had actually checked the deployed function code against it. The gap was only caught by verifying live configuration directly during the audit, not by re-reading docs more carefully. Reinforces the standing lesson from `craftbeer-kiwi-retrospective.md` about doc drift, extended to code: a decision being logged is not the same as a decision being shipped.
+
+**Ruled out:** Treating the `dryRun` gap as low-severity because "nothing bad happened yet" — same reasoning already rejected once for this exact function (see `DEC-014`'s own history), so it was fixed immediately rather than logged as a lower-priority to-do.
+
+**Full audit findings, checklist pass/fail detail:** `craftbeer-kiwi-security.md`, Audit log, "First audit — 29 July 2026."
+
+---
+
 ## Regional dry-run pagination added — confirmed not the cause of the Thorndon/Petone gap
 
 **ID:** `DEC-023`
@@ -156,6 +174,8 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 **Why this matters going forward:** this run is now the concrete example of exactly the failure mode `dryRun` was meant to prevent. It remains a to-do, but with direct evidence attached — see the national expansion decision above, where it's promoted to a hard blocker.
 
 **Update (28 July):** built. See `DEC-022` above for the `dryRun` implementation and its first real use, catching the `strictTypeFiltering` problem before it touched live data.
+
+**Correction (29 July):** the build above was opt-in only (`?dryRun=true`) — this entry's own title ("should be the default") was never actually implemented in code, despite reading as resolved. Caught during the first security audit by checking deployed code directly, not docs. Fixed and verified same day — see `DEC-024`.
 
 ---
 
