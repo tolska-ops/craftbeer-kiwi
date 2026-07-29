@@ -8,6 +8,62 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
+## Trend-driven filters: low/no-alcohol logged as a candidate; sustainability, style innovation, and premiumization deliberately not pursued
+
+**ID:** `DEC-027`
+
+**Decided:** Reviewed several current craft beer market trends (30 July) against whether they should become filterable brewery attributes. Only the low/no-alcohol trend was logged as a candidate (see `todo.md`, "Not started" — low priority, deferred until post-Wellington). Sustainability, style innovation (hazy IPAs, sours, cold IPAs, coffee stouts), and premiumization were considered and explicitly not pursued as filters or schema additions.
+
+**Why low-alc qualifies but the others don't:** a good filter candidate needs to be (a) a stable fact about the *brewery*, not a rotating fact about its current tap list, and (b) discriminating — genuinely true for some breweries and not others, so filtering on it actually narrows results for a visitor.
+
+- **Sustainability** fails the discriminating test — most craft breweries can plausibly claim some version of it (local sourcing, reduced packaging), so a filter wouldn't meaningfully narrow anything.
+- **Style innovation** (sours, hazy IPA, cold IPA, coffee stout etc.) fails the stability test — this is a fact about an individual beer/tap list, not the brewery itself, and turns over far faster than the directory could keep accurate. Flagging a brewery as "does sours" would carry the same "on tap today vs sometimes" staleness risk already identified as the real weakness of trend-driven filters generally.
+- **Premiumization** isn't a fact about a specific brewery at all — it's a market-positioning observation, with no natural yes/no to attach to a row.
+
+Low/no-alcohol survives both tests: whether a brewery produces a 0%/low-alc beer as part of its core range is a reasonably stable, genuinely binary fact, and — per the market research behind this decision — a real and growing search motivation (NZ non-alc share estimated at roughly 2.4-4% of beer sold and climbing, versus ~10-15% in more mature markets like the UK/Netherlands/Germany/Spain).
+
+**Ruled out:** Building a general-purpose `tags` array now to hold all four trends loosely. Considered, but rejected for the same reason as the individual filters — three of the four candidate tags don't have a stable, discriminating fact to store in the first place, so building the field early wouldn't be premature optimisation so much as a home for data that doesn't answer a real visitor question. If a general `tags` field is needed later, low-alc is a reasonable first (and possibly only, for now) entry — worth revisiting shape then rather than speculatively designing it around trends that didn't pass the test.
+
+**Why this matters beyond these four specific trends:** establishes a repeatable test (stable-to-the-brewery + discriminating) for evaluating future trend-driven feature requests, rather than re-litigating "is this worth building" from scratch each time a new market trend comes up.
+
+**ID:** `DEC-026`
+
+**Decided:** Added three new `breweries` columns, built and backfilled in `craftbeer-kiwi-DEV` first, then production (30 July):
+
+- **`region`** (text, nullable) — populated from the Brewers Guild of NZ's own regional groupings (e.g. `'Wellington, Wairarapa & Manawatū'`), rather than inventing a bespoke boundary scheme. All 24 current brewery rows and all 7 bar rows set to the same Wellington-region value, since region is a geographic fact independent of `venue_type`.
+- **`ownership_type`** (text, nullable, check constraint `independent`/`corporate-subsidiary`) — reuses the corporate-ownership findings already surfaced during the 28 July NZBN backfill (`DEC-021`): Panhead Custom Ales, Panhead Tory Street, and Tuatara Brewery set to `corporate-subsidiary` (Lion/Kirin and DB/Heineken respectively), all other 21 brewery rows set to `independent`. Left `null` on bar rows — not a meaningful attribute for a venue that isn't itself a brewery.
+- **`has_taproom`** (boolean, nullable) — whether the brewery has a public, visitable premises. Checked individually via web search for every current brewery rather than assumed from name/address alone (a few looked genuinely ambiguous going in — Duncan's Brewing, Kereru Brewing, North End Brewing). **Finding: all 24 current brewery rows have confirmed public taproom access** — nothing in the Wellington directory is currently production-only or distribution-only. Left `null` on bar rows.
+
+**Why prompted:** Andy supplied a Brewers Guild of NZ member-breweries-by-region listing (30 July) as a cross-reference source. Recognised as directly resolving `automation-plan.md`'s open national-rollout prerequisite #3 (region boundary definition) — using an industry body's own regional taxonomy avoids inventing one from Places API geometry. `ownership_type` and `has_taproom` were added in the same migration since they're cheap (mostly already-known data, or a quick verification pass) and both matter for the planned trail/passport feature — a brewery with no public premises isn't trail-relevant regardless of how good its beer is.
+
+**Nullable by default, not defaulted to a guess:** all three columns default to `null` for new rows (matching the existing `nzbn`/`watchlist` pattern) rather than a plausible-looking default like `ownership_type = 'independent'` or `has_taproom = true`. Both would have been correct for every row today, but a default that happens to be right 100% of the time on current data is still an unverified guess for the next automated insert — same reasoning already applied to `nzbn` (`DEC-021`) and the two-source-agreement closure rule (`DEC-005`): don't let "true so far" become "assumed true."
+
+**Numbering note (resolved 30 July):** this entry is numbered `DEC-026`, one ahead of `DEC-025`, because at the time it was drafted `DEC-025` (craft-curation policy) appeared to be missing from this file despite being referenced as actioned in `concept-benchmarks.md`. `DEC-025` has since been located/reconstructed below — see its own entry's "Documentation note" — so the gap this note originally flagged is closed. Numbering left as-is (`DEC-026` after `DEC-025`) rather than renumbered, since IDs are meant to stay stable references once assigned.
+
+**Region/rollout-phase naming mismatch, flagged not resolved:** the Brewers Guild's regional groupings don't map 1:1 onto `automation-plan.md`'s phased rollout order — Guild combines Northland+Auckland as one region and keeps Waikato/Bay of Plenty separate, while the rollout phases group "Auckland and Canterbury" together, then "Waikato, Bay of Plenty, Otago" as a second batch. `region`'s values will follow Guild's taxonomy (per Andy's confirmed choice); a rollout-phase-to-region lookup will be needed at expansion time rather than assuming the two schemes line up automatically.
+
+**Ruled out:** A bespoke region-boundary scheme (Places API bounding boxes or manual district definitions) — the Guild listing was already sitting there as a ready-made, industry-curated taxonomy; no reason to build a second one. Defaulting `ownership_type`/`has_taproom` to their current-universal values — see "Nullable by default" above.
+
+**Data-quality caveat carried over:** per the concept snapshot this list came from, the Brewers Guild directory is a paying-member list, so it undercounts smaller/independent breweries — useful as a cross-reference and regional taxonomy source, not a ground-truth completeness check.
+
+---
+
+## Craft-curation policy: corporately-owned breweries stay in, on the same footing as independents
+
+**ID:** `DEC-025`
+
+**Decided:** `craftbeer.kiwi`'s directory includes corporately-owned but independently-branded breweries — specifically Panhead Custom Ales (owned by Lion NZ Limited / Kirin) and Tuatara Brewery (owned by DB Breweries / Heineken) — on the same footing as independent breweries. Inclusion criterion is beer quality and whether it's a genuine brewery-run venue, not ownership structure.
+
+**Why:** Surfaced as an open product question during the 28 July NZBN backfill (`DEC-021`), when both breweries' corporate ownership was confirmed for the first time. Resolved during a 29 July research session that reviewed comparable NZ/AU platforms — notably BrewMap.com.au, which explicitly positions itself as "independent breweries only." Andy confirmed `craftbeer.kiwi` deliberately does not take that position: a curated stance excluding corporately-owned brands is a defensible market position (BrewMap proves that), but not the one this project wants, since Panhead and Tuatara are genuinely brewery-run venues making beer worth visiting for, regardless of who owns the parent company.
+
+**Related but distinct, not resolved by this decision:** Sprig + Fern raised a different question the same day (28 July, Nelson dry run) — independently owned (no corporate parent, confirmed via NZBN) but grown into a multi-region pub chain from a single Richmond brewery. Whether multi-region chain structure should be treated differently from single-site independents is still open; this decision only settles the corporate-ownership axis.
+
+**Ruled out:** An "independent breweries only" curation policy (BrewMap's positioning) — considered directly as a comparison, not adopted.
+
+**Documentation note:** this entry was reconstructed 30 July after being found missing from both the project-knowledge and local master copies of this file, despite being referenced as actioned in `craftbeer-kiwi-concept-benchmarks.md` and in a later session's own summary of its output. The original 29 July session did generate and describe this entry, but it evidently never made it into a saved version of this file — a gap in the re-upload-tracking workflow the doc-versioning cleanup (29 July) was meant to catch, that slipped through anyway. Reconstructed from the concept-benchmarks.md cross-reference and past-conversation history rather than from a lost draft.
+
+---
+
 ## First security audit: legacy Supabase key disabled, `dryRun` default gap found and fixed
 
 **ID:** `DEC-024`
