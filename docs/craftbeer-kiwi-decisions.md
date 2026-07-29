@@ -271,6 +271,12 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 **Trade-off accepted:** This protects against casual exposure (nothing to breach, since there's no account) but not against someone who has the raw ID directly editing that data — it's obscurity via random string, not real authentication. Judged acceptable for a brewery trail list; would not be acceptable for anything sensitive.
 
+**Update (29 July) — design refinement, not yet built:** Prompted by comparing craftbeer.kiwi against other brewery-discovery apps (the NY Craft Beer app's passport programme, Untappd's badge system), two additions are worth building into the trail feature when it's actually implemented, rather than bolted on afterwards:
+1. **A completion payoff.** The current design leaves a finished trail as just a static list — worth adding something at the end (even a simple shareable "you did the [region] crawl" completion card), so the feature has a payoff rather than just being a bookmark list.
+2. **Lightweight anonymous badges.** A handful of named badge definitions (e.g. "Brewtown Crawl," "CBD Five") checked against a trail's brewery contents — no new identity or privacy surface, since it's evaluated against the same anonymous `crypto.randomUUID()` a trail already uses.
+
+Both fit the existing anonymous-ID design with no new auth requirement. No decision to build yet — captured here so the shape isn't lost before the feature's next picked up.
+
 ---
 
 ## Edge Functions: `brewery-sync` and `brewery-discover` kept separate

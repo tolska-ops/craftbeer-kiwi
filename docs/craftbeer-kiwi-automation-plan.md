@@ -1,6 +1,6 @@
 # craftbeer.kiwi — Automated Brewery Discovery & Closure Detection
 
-**Written:** 11 July 2026 · **Updated:** 28 July 2026
+**Written:** 11 July 2026 · **Updated:** 29 July 2026
 **Purpose:** Living reference for the automation build — why it exists, the architecture, current status, and what's still ahead. Earlier versions of this doc were a forward-looking build plan; as of 20 July the core of both Edge Functions is written and deployed, and as of 27 July both have been successfully tested end-to-end for the first time — this version describes what's actually built, what's actually been proven to work, and what's still planned.
 
 ---
@@ -47,8 +47,8 @@ alter table breweries add column venue_type text not null default 'brewery';
 ### Google Cloud + Places API — done
 Set up as a business account under Craft Beer Kiwi Collective Limited: project created, billing enabled, Places API (New) enabled, restricted API key generated and stored in Bitwarden as a Secure Note. Application (IP) restriction is deliberately deferred until the Edge Functions' egress IPs are known.
 
-### NZBN API — not started
-Registration and subscription-key setup at business.govt.nz hasn't happened yet. This remains the single biggest gap between the current closure-check logic and its originally designed two-source-agreement standard (see below).
+### NZBN API — registration submitted, awaiting approval
+Account created at api.business.govt.nz (29 July), under Andy's personal RealMe login with "Craft Beer Kiwi Collective Limited" recorded as the organisation. Subscribed to the NZBN – v5 product via the subscription-key method (static key, no end-user OAuth needed — correct fit, since this is a server-side read-only lookup, not something requiring a logged-in user's consent to update records). Both a production and sandbox key were requested together under one subscription, state currently "Submitted" pending MBIE's approval (may include an API Agreement to sign). Once approved: sandbox key goes into `craftbeer-kiwi-DEV`'s config first, per the existing dev-first workflow; production key only ever touches the live Edge Function's environment, never committed to GitHub — same handling as the Places API key. This remains the single biggest gap between the current closure-check logic and its originally designed two-source-agreement standard (see below) until it's actually wired into `brewery-sync`.
 
 ### Supabase Edge Functions — both now successfully tested end-to-end
 
@@ -120,11 +120,56 @@ Kept as a saved SQL query in Supabase's SQL Editor for now rather than a dedicat
 - **Brewers Association of NZ national list** (brewers.org.nz/beer-in-nz) — confirmed stale (dated 2016 at the bottom of the page; missing Waitoa and Fortune Favours; includes mainstream corporate brands alongside genuine craft breweries). Not a data source to trust directly, but worth a manual scan as a name checklist when expanding beyond Wellington.
 - **NZ Customs Excise CCA list** — cross-checked once against all 18 (at the time) breweries; caveat identified: it records manufacturing addresses only, not public-facing taprooms, so address mismatches against it aren't reliable error signals on their own.
 
+### OpenStreetMap / Overpass API — candidate discovery cross-check, not yet actioned (found 29 July)
+
+Surfaced while looking at what other providers (beyond Google and MBIE) offer relevant API access. OpenStreetMap is a free, crowdsourced global map database, entirely separate from Google's Places index — different contributors, different data model, queried via the free Overpass API (Overpass QL, its own query language, well documented).
+
+**Why it's a genuinely different signal, not a duplicate of Places:** OSM has purpose-built tags for this exact distinction — `craft=brewery` / `microbrewery=yes` for actual breweries, versus `amenity=pub` / `amenity=bar` for venues that just sell beer. That's the same brewery-vs-bar problem `venue_type` was built to solve after the fact from Places' broader search results — OSM's tagging model draws the line at the source, for anyone who's bothered to tag it correctly.
+
+**Proposed use — cross-check, not replacement:** run an Overpass query for `craft=brewery`/`microbrewery=yes` in a region alongside the existing `brewery-discover` Places run, and diff the two result sets. Three useful outcomes: (1) OSM has a brewery Places missed entirely — worth a manual look; (2) Places has one OSM doesn't — expected, since OSM coverage depends on volunteer tagging; (3) both agree — mild extra confidence on an already-found brewery. Not proposed as a primary source, since coverage is patchy by nature (crowdsourced, no guarantee any given NZ brewery has been tagged, let alone tagged correctly).
+
+**Cost:** genuinely free — no per-request billing, unlike every Places-side option considered so far (Text Search, Aggregate). Public Overpass instances do rate-limit (10,000 queries/day, 5GB/day, 180s query timeout), which is nowhere near a constraint at this project's scale.
+
+**Not yet actioned:** no NZ coverage quality check has been done yet — worth a quick manual Overpass Turbo query against Wellington's known 23 breweries as a first test, to see how many are actually tagged correctly before relying on it for anything. If Wellington's coverage (a market Andy can personally verify) turns out patchy, that's a reasonable proxy for what to expect elsewhere.
+
+### RateBeer — candidate closure-status cross-check, not yet actioned (found 29 July)
+
+Surfaced while checking whether Untappd had any real alternatives, after confirming Untappd's own API has been closed to new applicants for years despite genuine NZ usage (NZ-specific badges, an NZ top-rated-breweries page, real check-in activity at NZ venues). RateBeer, by contrast, still runs an open, self-service API request process (GraphQL, `api.r8.beer`, sandbox + production environments, ~5,000 calls/month starting allowance, 7–10 business day turnaround) — a live option Untappd no longer is.
+
+**Why it's more relevant than a typical beer-rating platform:** RateBeer's New Zealand brewery listing explicitly tracks **236 active and 103 closed** breweries, tagged as such per entry — not just ratings and reviews, an actual maintained active/closed status per brewery. That's the same distinction `is_active` exists to capture, from a source with no relationship to Places or NZBN, and (unlike BeerAdvocate, whose own NZ pages admit their dataset is too small for a complete top-100 list) apparently enough NZ volume to be worth a look.
+
+**Proposed use — same cross-check pattern as OSM, not a primary source:** if the API (or even manual lookup) can return a brewery's active/closed status, that's a fourth possible input alongside Places, NZBN, and Insolvency Register — most useful as a tie-breaker or extra confidence signal, not something to wire into the two-source-agreement auto-close logic on its own. Crowd-maintained data carries the same caveat as OSM: accuracy depends on RateBeer's own community bothering to mark a brewery closed, not a guarantee.
+
+**Not yet actioned:** haven't yet checked how many of Wellington's 23 breweries actually appear in RateBeer's NZ list, or how current the active/closed tagging looks in practice — "236 active, 103 closed" confirms real volume exists nationally, but says nothing yet about Wellington-specific coverage or freshness. Worth a manual spot-check (browsing the NZ breweries list, no API request needed for that) before deciding whether requesting API access is worth the 7–10 day wait.
+
 ## Phase 2 (future enhancement, not part of the current build)
 
 Ministry of Justice — Register of Licences & Certificates, as a third, even-stronger verification signal. A brewery legally cannot sell alcohol without an active on-licence or off-licence under the Sale and Supply of Alcohol Act 2012 — so a brewery dropping off this register is about as authoritative a "no longer trading" signal as exists.
 
 Not part of the current build because it's a bulk file (updated quarterly — Feb/May/Aug/Nov), not a live API — a different integration pattern (download + parse + match) from the live Places/NZBN API calls. Worth adding once the core two-source system is working and proven, as a periodic extra cross-check rather than something the scheduled job queries directly.
+
+### MBIE Insolvency Register API — candidate third source, live API (found 29 July)
+
+While registering for the NZBN API, a wider look at MBIE's API portal (`api.business.govt.nz`) surfaced the **Insolvency Register API** as a genuinely relevant addition, distinct from the other MBIE APIs reviewed (Companies Register, IPONZ, LBP, MVTR, NZP&M, PPSR, RSM, Tenancy Services, CERT NZ — all assessed and ruled out as not applicable to this project).
+
+**What it does:** an on-demand, name/number search against NZ's public insolvency and debt repayment order registers. Unlike NZBN's company-status field (which can show a stale or superseded "In Liquidation" status without indicating whether that's the *current* trading entity — see Boneface below), this queries the insolvency register directly for active cases.
+
+**Why it's worth adding:** directly resolves the exact ambiguity the 28 July NZBN backfill ran into with Boneface Brewing Co — NZBN shows "In Liquidation" but it's unclear whether that reflects the current entity or a pre-ownership-change record (watchlisted, not actioned, per `craftbeer-kiwi-decisions.md` DEC-021). A live insolvency-register check could turn that from "watchlisted, unclear" into either "confirmed active insolvency case, escalate" or "no active case, clear the watchlist flag" — same value for any future ambiguous NZBN liquidation status.
+
+**Fit with the existing two-source-agreement rule:** doesn't replace NZBN in that rule, but strengthens it — could act as a tie-breaker specifically for liquidation-status ambiguity, or eventually as a genuine third source alongside Places + NZBN for the closure-check logic once NZBN itself is wired into `brewery-sync`.
+
+**Integration effort:** low incrementally — same MBIE API portal, same account already used for the NZBN registration (see "NZBN API" status above). MBIE's own guidance is to query on-demand rather than mirror the register locally, which matches the project's existing pattern (no local copy of Places/NZBN data either, beyond what's cached in `breweries`).
+
+**Sequencing:** add to the same subscription request once the NZBN sandbox key comes through, rather than treating it as separate scope. Not a blocker on anything currently in progress.
+
+### Other MBIE APIs reviewed and ruled out (29 July)
+
+For completeness — `api.business.govt.nz` hosts APIs beyond NZBN and Insolvency Register, all checked and not a fit for this project:
+
+- **Companies Register API** — sounds relevant, but it's for *creating/maintaining* companies a user has authority over (filing annual returns, updating directors), not for looking up other businesses. MBIE's own docs point back to the NZBN API for lookups, which is already the plan.
+- **IPONZ** (trademarks/patents) — could theoretically check brand trademark registration, but that's a brand-dispute use case, not closure detection. Not pursued.
+- **PPSR** (security interests over property/equipment) — a brewery's equipment showing a registered security interest doesn't reliably mean financial distress (most commercial financing shows up here); too noisy a signal for the effort of integrating.
+- **CERT NZ, LBP, MVTR, NZP&M, RSM, Tenancy Services** — no plausible connection to a brewery directory (cybersecurity incident reporting, building practitioners, motor vehicle dealers, petroleum/minerals, radio spectrum, residential tenancy).
 
 ## National expansion: phased regional rollout
 
@@ -137,6 +182,8 @@ Not part of the current build because it's a bulk file (updated quarterly — Fe
 3. **Region boundary definition.** Decide whether "a region" means a Places API geographic bounding box or a text-query bias per city/district (current Wellington query uses the latter). This determines how many separate `brewery-discover` runs a full national rollout actually is.
 
 None of the phase work below should start until these three are resolved.
+
+**Candidate tool for prerequisite 3 — Places Aggregate API (found 29 July).** Google's Places Aggregate API (formerly Places Insights API, GA as of early 2026) returns place counts/density for a given area and place type, rather than individual results — could answer "how many brewery-type places does Google think exist in Auckland" as a single query before running a full `brewery-discover` pass there. Two possible uses: (1) sizing the manual-triage workload for a region ahead of time, so the per-region workflow's triage step isn't a surprise; (2) a cheap completeness check — comparing Aggregate's count against what Text Search actually returned, to catch a region where discovery silently missed a chunk. **Not yet actioned:** it's a separate billed API on top of existing Places usage, and NZ coverage / per-request pricing haven't been confirmed against the Cloud Console — needs checking before it's relied on, not assumed from Google's marketing pages. Worth resolving as part of prerequisite 3 above, not a separate task.
 
 ### Phase order
 
@@ -174,6 +221,8 @@ Ordered by brewery density and how well Andy can personally sanity-check results
 - **New, added 28 July — should the MoJ Register of Licences & Certificates also feed the discovery cross-reference step, not just closure verification?** Originally scoped in Phase 2 purely as a third closure-verification signal, but it's arguably a stronger discovery source too — a real legal record (active on/off-licence) rather than a search-relevance guess, which beats the already-known-stale Brewers Association list and is more authoritative than the tourism-page cross-check. Not free, though: it's a quarterly bulk file, not a live API, so using it means download + parse + fuzzy name/address matching against candidates — closer in effort to a small version of `brewery-discover` itself than to just adding a box to the cross-reference step. If pursued, sequencing idea: use the most recent quarterly file at rollout time rather than waiting on it, then periodically re-run it as a standing re-verify pass per region once a newer file drops — which also doubles as ongoing input to the closure-detection use case it was originally scoped for.
 - **New, added 28 July, resolved 28 July — should `breweries` get an `nzbn` column, and should populating it ever be automated?** Column added (`nzbn` text, plus `nzbn_entity_name` text for the registered legal name). **Automation question answered by doing the manual pass first:** all 23 breweries checked by hand, several genuinely ambiguous (multiple candidate entities, trading name diverging from legal name, conglomerate-owned brands) requiring judgment calls a simple name search couldn't have made automatically. Confirms the original estimate — this would have been a real, separate build, not a quick add-on. Manual lookup during triage remains the right approach; automating it isn't worth revisiting unless brewery volume grows enough to make manual lookup itself the bottleneck. Full findings, including two confirmed multi-site NZBN matches and two conglomerate-ownership complications, in `craftbeer-kiwi-decisions.md`.
 
+- **New, added 29 July — should the Insolvency Register API be subscribed to alongside NZBN, or held back until NZBN itself is wired into `brewery-sync`?** Leaning towards subscribing now (same account, low marginal effort) but not wiring it into any automated logic until NZBN's own two-source-agreement upgrade is live and proven — avoids building against a third source before the second one is actually working end-to-end. Not yet decided for certain.
+
 ## What needs building next, in order
 
 1. *Resolve the Supabase `sb_secret_...` key issue* — **done 27 July.** Root cause was an incomplete `auth: "secret"` mode missing the required key name; fixed to `auth: "secret:brewery_sync_v2"` on both functions.
@@ -181,6 +230,6 @@ Ordered by brewery density and how well Andy can personally sanity-check results
 3. **Add the `dryRun` flag to `brewery-discover`** — now a hard blocker on the national expansion rollout above, not just a nice-to-have for the next Wellington run.
 4. Resolve the query-narrowing and region-boundary questions in the National Expansion Plan above.
 5. Run the first regional dry run (Auckland or Canterbury) and validate the per-region workflow before treating it as repeatable.
-6. Register for the NZBN API and wire it into `brewery-sync`, upgrading closure detection to real two-source auto-close.
+6. Register for the NZBN API and wire it into `brewery-sync`, upgrading closure detection to real two-source auto-close. **Registration submitted 29 July, awaiting MBIE approval** — once approved, wire the sandbox key into `craftbeer-kiwi-DEV` first.
 7. Add the Anthropic description-generation step for newly-discovered breweries.
 8. Schedule both functions (`pg_cron` or Supabase's built-in cron) — now that both have a proven successful run, but given the discovery quality findings, worth holding off on scheduling `brewery-discover` specifically until either the `dryRun` flag or a narrower search query is in place.
