@@ -8,6 +8,30 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
+## Theme picker limited to Light/Dark; DEV `is_published`/`has_theme` backfill drift found and fixed
+
+**ID:** `DEC-028`
+
+**Decided:** Changed the map theme `<select>` in `App.jsx` to render only `THEMES` entries whose ID appears in a new `VISIBLE_THEME_IDS = ['light', 'dark']` constant, rather than listing every key in `THEMES`. Dive Bar and Hop Explosion stay fully defined in the registry exactly as before — nothing rebuilt or lost — they just don't appear as selectable options until they have real Mapbox style URLs (`TD-023`).
+
+**Why:** The two placeholder themes were visible and selectable in production despite pointing at non-existent Mapbox style IDs (`PLACEHOLDER/decimal-style-id`, `PLACEHOLDER/finland-topo-style-id`) — a visitor picking either would get a broken map. Hiding them at the picker level (rather than removing them from `THEMES`) keeps `DEC-010`'s original registry structure intact for when the real styles are ready.
+
+**Second issue found during testing, same session:** testing the change against `craftbeer-kiwi-DEV` showed zero brewery pins with no console/UI error. Traced to `is_published` and `has_theme` (added 28 July, `DEC-019`) never having been backfilled to DEV's two active test breweries (Test Brewery Alpha, Test Brewery Beta) — both defaulted to `false`, so they silently failed the frontend's `is_published = true` publish-gate filter. Fixed via direct SQL:
+
+```sql
+update breweries
+set is_published = true, has_theme = true
+where name in ('Test Brewery Alpha', 'Test Brewery Beta');
+```
+
+Both columns had to be set together because of the `theme_required_to_publish` constraint (`DEC-019`) — setting `is_published = true` alone would have violated it.
+
+**Why this matters beyond the fix itself:** this is the second confirmed instance of the same drift pattern — a column added and backfilled in production without an equivalent backfill in DEV, discovered only by tripping over it rather than by any proactive check. First instance was `region`/`ownership_type`/`has_taproom` earlier the same day. `TD-043` added to `todo.md` to audit DEV against prod for other quiet gaps, rather than continuing to find them one at a time.
+
+**Ruled out:** Deleting `diveBar`/`hopExplosion` from `THEMES` entirely — would mean re-entering the same accent/header colour data later for no reason, since the picker-level filter achieves the same visible result without losing anything.
+
+---
+
 ## Trend-driven filters: low/no-alcohol logged as a candidate; sustainability, style innovation, and premiumization deliberately not pursued
 
 **ID:** `DEC-027`
@@ -34,7 +58,7 @@ Low/no-alcohol survives both tests: whether a brewery produces a 0%/low-alc beer
 - **`ownership_type`** (text, nullable, check constraint `independent`/`corporate-subsidiary`) — reuses the corporate-ownership findings already surfaced during the 28 July NZBN backfill (`DEC-021`): Panhead Custom Ales, Panhead Tory Street, and Tuatara Brewery set to `corporate-subsidiary` (Lion/Kirin and DB/Heineken respectively), all other 21 brewery rows set to `independent`. Left `null` on bar rows — not a meaningful attribute for a venue that isn't itself a brewery.
 - **`has_taproom`** (boolean, nullable) — whether the brewery has a public, visitable premises. Checked individually via web search for every current brewery rather than assumed from name/address alone (a few looked genuinely ambiguous going in — Duncan's Brewing, Kereru Brewing, North End Brewing). **Finding: all 24 current brewery rows have confirmed public taproom access** — nothing in the Wellington directory is currently production-only or distribution-only. Left `null` on bar rows.
 
-**Why prompted:** Andy supplied a Brewers Guild of NZ member-breweries-by-region listing (30 July) as a cross-reference source. Recognised as directly resolving `automation-plan.md`'s open national-rollout prerequisite #3 (region boundary definition) — using an industry body's own regional taxonomy avoids inventing one from Places API geometry. `ownership_type` and `has_taproom` were added in the same migration since they're cheap (mostly already-known data, or a quick verification pass) and both matter for the planned trail/passport feature — a brewery with no public premises isn't trail-relevant regardless of how good its beer is.
+**Why prompted:** Andy supplied a Brewers Guild of NZ member-breweries-by-region listing (30 July) as a cross-reference source. Recognised as directly resolving `automation-plan.md`'s `AP-PREREQ-3` (region boundary definition) — using an industry body's own regional taxonomy avoids inventing one from Places API geometry. `ownership_type` and `has_taproom` were added in the same migration since they're cheap (mostly already-known data, or a quick verification pass) and both matter for the planned trail/passport feature — a brewery with no public premises isn't trail-relevant regardless of how good its beer is.
 
 **Nullable by default, not defaulted to a guess:** all three columns default to `null` for new rows (matching the existing `nzbn`/`watchlist` pattern) rather than a plausible-looking default like `ownership_type = 'independent'` or `has_taproom = true`. Both would have been correct for every row today, but a default that happens to be right 100% of the time on current data is still an unverified guess for the next automated insert — same reasoning already applied to `nzbn` (`DEC-021`) and the two-source-agreement closure rule (`DEC-005`): don't let "true so far" become "assumed true."
 
