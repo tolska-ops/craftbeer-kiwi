@@ -77,6 +77,9 @@ const THEMES = {
     headerText: '#1A1A1A',
   },
 };
+// Themes visible in the picker. Add 'diveBar' / 'hopExplosion' back in
+// once they have real Mapbox style URLs (see TD-023).
+const VISIBLE_THEME_IDS = ['light', 'dark'];
 function App() {
   const [breweries, setBreweries] = useState([])
   const [selected, setSelected] = useState(null)
@@ -202,7 +205,7 @@ const labelGeoJSON = useMemo(() => ({
       fontWeight: 600,
     }}
   >
-    {Object.values(THEMES).map((t) => (
+    {Object.values(THEMES).filter((t) => VISIBLE_THEME_IDS.includes(t.id)).map((t) => (
       <option key={t.id} value={t.id}>{t.label}</option>
     ))}
     </select>
