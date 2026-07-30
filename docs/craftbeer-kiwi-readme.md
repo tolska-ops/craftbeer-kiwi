@@ -1,6 +1,6 @@
 # craftbeer.kiwi
 
-**Last updated:** 29 July 2026
+**Last updated:** 31 July 2026
 **Note:** This is the single source of truth for the current brewery count and live status — other docs (todo.md, automation-plan.md, retrospective.md) should reference this file rather than restate the count.
 
 An interactive directory and map of Wellington-region craft breweries, with plans for brewery-trail check-ins and gamified badges.
@@ -13,7 +13,7 @@ An interactive directory and map of Wellington-region craft breweries, with plan
 
 craftbeer.kiwi is a personal side project — a functional brewery directory app and a hands-on way of learning the modern web stack (React, Supabase, Mapbox, Vercel) at the same time. Inspiration comes from established brewery-trail concepts overseas (e.g. the South Shore and Idaho Brewery Trails).
 
-Current state: a live, deployed map showing 23 verified Wellington-region breweries, each with a custom-themed pin, marker clustering for dense areas (e.g. Upper Hutt's Brewtown, which hosts four separate breweries at one address), and a styled popup with brewery details.
+Current state: a live, deployed map showing 24 verified Wellington-region breweries, each with a custom-themed pin, marker clustering for dense areas (e.g. Upper Hutt's Brewtown, which hosts four separate breweries at one address), and a styled popup with brewery details.
 
 Planned next: automated brewery discovery/closure detection, user check-ins, digital passports, and tiered rewards.
 

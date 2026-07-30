@@ -8,6 +8,38 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
+## `description` backfilled for the 5 rows missing it; Aro Taproom added to the Garage Project NZBN watchlist
+
+**ID:** `DEC-030`
+
+**Decided:** Found and fixed a data-quality gap: 5 of 24 active brewery rows had `description = null` — Double Vision Brewing - DUB HUB Island Bay, Garage Project Aro Taproom, Panhead Tory Street, Three Sisters Brewery Ltd, and Waitoa Victoria St. Written via verified web search, one factual sentence each (location plus a distinguishing detail), matching the existing style used across the other 19 rows. All five are taproom/bar-style venues for brands brewed elsewhere - consistent with the pattern already established for Panhead Custom Ales and Tuatara Brewery.
+
+Also added Garage Project Aro Taproom to the existing NZBN watchlist note shared by the other three Garage Project sites (`TD-024`) - it missed the 28 July NZBN backfill pass because it was `is_active = false` at the time, not because its ownership situation is any different from Leeds Street or Wild Workshop.
+
+**How found:** Andy noticed some breweries had no description while reviewing the map. A full null-content audit was run across all columns (not just `description`) while investigating - everything else (website, coordinates, region, ownership_type, has_taproom, last_verified) was fully populated; the 4 missing `nzbn` values were already known/watchlisted except for Aro Taproom, which was a genuine small gap.
+
+**Worth noting:** Three Sisters Brewery Ltd's description makes explicit that it's a Wellington outpost of a New Plymouth-founded brewery, not a locally-founded one - confirmed via web search (Andy already aware). `region`/`ownership_type` currently treat it the same as locally-founded independents; whether an out-of-region parent brand should be flagged any differently is not currently tracked and hasn't been raised as a product question.
+
+**Ruled out:** Nothing rejected here - this was a straightforward gap-fill following the existing `website`-null-audit pattern (`DEC-003`), not a new design decision.
+
+---
+
+## Mobile popup header-overlap fixed via measured header height; `GeolocateControl` moved off top-right
+
+**ID:** `DEC-029`
+
+**Decided:** Replaced the brewery pin's hardcoded `padding: { top: 120, ... }` fly-to value with a runtime measurement — `const headerHeight = headerRef.current?.offsetHeight || 120` — read fresh on every pin click and used as `top: headerHeight + 20`. Separately, moved Mapbox's `GeolocateControl` from `position="top-right"` to `position="bottom-right"`.
+
+**Why:** `TD-001` (the popup-header-overlap regression) had the same root cause both times it appeared: a hardcoded pixel offset tuned against the header's height at the time, which silently went stale the next time the header grew (first the 21 July theme-dropdown addition, this time nothing new — the bug had simply never been properly fixed, only patched to match one specific header height). Reading `offsetHeight` at click time makes the fix self-correcting against any future header change, rather than requiring someone to remember to retune a number. While testing this fix, a second, previously-unnoticed instance of the identical underlying problem was found: `GeolocateControl`'s own built-in positioning (`top: 10px` from the map container) also placed it underneath the header, making the button unreachable — same header-overlay-on-map root cause, different element, never touched by any prior fix because nobody had tried to click it while investigating the popup bug specifically.
+
+**Why `bottom-right` over measuring `GeolocateControl` too:** the popup fix needs the header height because the popup's position is meaningfully tied to *which pin was clicked* (its fly-to target). `GeolocateControl` has no such per-click positioning need — it's a static button — so moving it to a corner the header never reaches is a simpler, permanent fix with no dynamic measurement required at all. Applying the same `headerRef.current?.offsetHeight` pattern here would have worked but added complexity (custom CSS override of Mapbox's internal `.mapboxgl-ctrl-top-right` class) for no real benefit over a one-line position change.
+
+**Confirmed:** both fixes tested and working in production (30 July) - real pin clicks clear the header correctly, `GeolocateControl` reachable and centring correctly at bottom-right.
+
+**Ruled out:** Leaving `GeolocateControl` at `top-right` and adding a dynamic margin/offset to match the header height - more moving parts for a control that doesn't need per-click positioning logic.
+
+---
+
 ## Theme picker limited to Light/Dark; DEV `is_published`/`has_theme` backfill drift found and fixed
 
 **ID:** `DEC-028`
@@ -69,6 +101,8 @@ Low/no-alcohol survives both tests: whether a brewery produces a 0%/low-alc beer
 **Ruled out:** A bespoke region-boundary scheme (Places API bounding boxes or manual district definitions) — the Guild listing was already sitting there as a ready-made, industry-curated taxonomy; no reason to build a second one. Defaulting `ownership_type`/`has_taproom` to their current-universal values — see "Nullable by default" above.
 
 **Data-quality caveat carried over:** per the concept snapshot this list came from, the Brewers Guild directory is a paying-member list, so it undercounts smaller/independent breweries — useful as a cross-reference and regional taxonomy source, not a ground-truth completeness check.
+
+**Count clarification (31 July):** "24 current brewery rows" above counts all `venue_type = 'brewery'` rows in the table, not just live/`is_active = true` ones — at the time this was written, that included Garage Project Aro Taproom, then still suppressed (`is_active = false`) under the original `DEC-015` near-duplicate call. Other docs (README, most of `todo.md`) quoted 23 for the same period, meaning the live count. See `DEC-015`'s correction: Aro Taproom has since been confirmed as a genuine second site and reactivated, so as of 31 July the live count and the total row count are both back to 24, and this note is no longer a live discrepancy — kept for the record.
 
 ---
 
@@ -231,17 +265,19 @@ Low/no-alcohol survives both tests: whether a brewery produces a 0%/low-alc beer
 
 ---
 
-## Near-duplicate listings: `is_active = false`, not `venue_type`
+## Garage Project Aro Taproom: reactivated — genuine second site, not a duplicate
 
 **ID:** `DEC-015`
 
-**Decided:** Garage Project Aro Taproom — a near-duplicate row for a brewery already in the directory, surfaced by the same 27 July run — was suppressed via `is_active = false` rather than reclassified via `venue_type`.
+**Originally decided (27 July):** Garage Project Aro Taproom was treated as a near-duplicate row for a brewery already in the directory, and suppressed via `is_active = false` rather than reclassified via `venue_type`.
 
-**Why:** It's a genuine brewery-owned venue, not a bar — `venue_type = 'bar'` would misrepresent what it is. `is_active = false` correctly describes the actual problem: this row shouldn't display because it's a repeat of one already represented, not because it's the wrong kind of venue.
+**Correction (31 July):** This was wrong. Checking the actual addresses — Garage Project (68 Aro Street) vs. Garage Project Aro Taproom (91 Aro Street) — shows two different premises on the same street, not one site double-listed under two `place_id`s. Web search confirmed 91 Aro is Garage Project's own operating taproom, across the road from the original brewery, currently trading (Tue–Sun). Andy confirmed the brewery/taproom split is real and taprooms are in scope for the directory. Reactivated (`is_active = true`, 31 July) — `is_published`/`has_theme` were already `true` on this row, so no further gating changes were needed for it to reappear on the map. Live brewery count returns to 24.
 
-**Ruled out:** Deleting the row (loses the record of the near-duplicate) or leaving it active (would show a redundant pin for a brewery already on the map).
+**Why the original call was wrong:** the "same physical site, two listings" assumption was never checked against the actual address data — the two rows' street numbers were sitting right there in the table and would have shown the mismatch immediately. Worth noting as a process point: a "near-duplicate" classification should be confirmed against address (or a map check), not assumed from name similarity alone.
 
-**Open problem, not resolved by this:** doesn't fix the underlying cause — Places assigning a different `place_id` to what's arguably the same brand's site — so this could recur on a future run and would again need a human to spot it.
+**Ruled out (at the time, no longer relevant):** Deleting the row, or reclassifying via `venue_type = 'bar'`.
+
+**Still open:** the underlying dedup blind spot this was originally meant to address — Places assigning distinct `place_id`s to what can look like the same brand's site — is still real for genuine future duplicates. This correction doesn't change that; it just confirms this particular case wasn't one.
 
 ---
 
