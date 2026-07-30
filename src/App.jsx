@@ -87,7 +87,7 @@ function App() {
   const [bounds, setBounds] = useState(null)
   const [zoom, setZoom] = useState(10)
   const [userLocation, setUserLocation] = useState(null);
- const [themeId, setThemeId] = useState(() => {
+  const [themeId, setThemeId] = useState(() => {
   const saved = localStorage.getItem('mapTheme');
   if (saved && THEMES[saved]) return saved;
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -97,10 +97,9 @@ useEffect(() => {
   localStorage.setItem('mapTheme', themeId);
 }, [themeId]);
 
-const theme = THEMES[themeId];
-
-
+  const theme = THEMES[themeId];
   const mapRef = useRef(null)
+  const headerRef = useRef(null)
   useEffect(() => {
    if (!navigator.geolocation) {
   // Geolocation not supported at all — don't guess, leave marker unrendered.
@@ -184,7 +183,7 @@ const labelGeoJSON = useMemo(() => ({
   return (
     <div className="app-container">
     <Analytics />
-    <header className="app-header" style={{ background: theme.headerBg, color: theme.headerText }}>
+    <header className="app-header" ref={headerRef} style={{ background: theme.headerBg, color: theme.headerText }}>
       <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em' }}>
         craftbeer.kiwi
       </h1>
@@ -235,7 +234,7 @@ const labelGeoJSON = useMemo(() => ({
         onLoad={updateBoundsAndZoom}
         onMoveEnd={updateBoundsAndZoom}
       >
-        <GeolocateControl position="top-right" trackUserLocation={true} showUserHeading={true} />
+        <GeolocateControl position="bottom-right" trackUserLocation={true} showUserHeading={true} />
         <Source id="brewery-labels" type="geojson" data={labelGeoJSON}>
           <Layer
             id="brewery-name-labels"
@@ -315,7 +314,8 @@ const labelGeoJSON = useMemo(() => ({
               onClick={(e) => {
                 e.originalEvent.stopPropagation()
                 setSelected(b)
-                mapRef.current.flyTo({ center: [longitude, latitude], zoom: Math.max(zoom, 14), duration: 800, padding: { top: 120, bottom: 0, left: 0, right: 0 } })
+                const headerHeight = headerRef.current?.offsetHeight || 120
+                mapRef.current.flyTo({ center: [longitude, latitude], zoom: Math.max(zoom, 14), duration: 800, padding: { top: headerHeight + 20, bottom: 0, left: 0, right: 0 } })
               }}
             >
               <div className="brewery-pin">
