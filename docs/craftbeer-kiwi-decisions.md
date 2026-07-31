@@ -8,7 +8,78 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
-## `description` backfilled for the 5 rows missing it; Aro Taproom added to the Garage Project NZBN watchlist
+## Google Places data: signal only, not source of record — coordinates/name/address to be independently sourced
+
+**ID:** `DEC-033`
+
+**Decided (31 July):** Google Places API content (beyond `place_id`) will no longer be treated as craftbeer.kiwi's source of record for displayed brewery data. Two specific terms drove this:
+- Google's Maps Platform terms prohibit using Places content in conjunction with a non-Google map (craftbeer.kiwi uses Mapbox) — this applies regardless of how the content is obtained.
+- Places' own caching exceptions only cover `place_id` (indefinite) and lat/long (30 days); everything else, including name and address, has no long-term storage allowance.
+
+Going forward: `place_id` continues to be stored indefinitely and used for status lookups (`brewery-sync`) and dedup matching (`brewery-discover`), unchanged. Coordinates, name, and address for anything *displayed* on the map will be sourced independently — e.g. manual verification/geocoding at add-time, the same pattern already used for `description` (`DEC-030`) — rather than taken directly from a Places response and stored long-term.
+
+**Why:** Flagged during a copyright/licensing review (31 July) — not a copyright issue as such (facts aren't copyrightable), but a real contractual risk: API key suspension if Google's automated enforcement ever flags the project. The fix also happens to match the project's existing "verify, don't trust a single source" pattern (`DEC-005`), so it's a natural extension rather than a new discipline.
+
+**Scope not yet resolved:** exactly how re-sourcing works in practice (which geocoder, how the manual-add workflow changes, whether existing seed data needs re-verifying) is deliberately left open here — tracked as `TD-045`, not designed in this entry.
+
+**Retroactive check completed (31 July):** built `scripts/check-geocode-drift.mjs` — read-only, re-geocodes each row's stored `address` via Mapbox and flags any row where the result disagrees with the stored `latitude`/`longitude` by more than 250m, or where Mapbox can't match the address at all. Run against `craftbeer-kiwi-DEV` first (correctly flagged all 4 fake test rows, whose placeholder addresses and coordinates were never meant to correspond — confirmed the script works before trusting it against real data), then against production: **31/31 rows checked, 0 flagged, 0 errors** — every existing brewery and bar's coordinates are already within tolerance of an independent source. The existing 23-brewery seed data did not need correcting; going forward, only the *sourcing method* changes (`brewery-discover`'s insert path, the manual-add workflow), not the historical data itself.
+
+**`brewery-discover` re-sourcing shipped and verified (31 July):** `brewery-discover`'s insert path now geocodes each Places candidate's address via Mapbox and stores Mapbox's own address/coordinates, not Google's — `place_id` keeps its existing role as a dedup/status-lookup key only, which the caching exceptions permit indefinitely. `name` and `website` remain Places-sourced (treated as low-risk facts, and every candidate is still gated behind `flagged_for_review = true` / `is_published = false` until manually triaged, so an incorrect one is caught there regardless). Same change also fixed a separate pre-existing gap where the insert never set `is_published`/`has_theme`, which would have failed the `theme_required_to_publish` check constraint (`DEC-019`) on the next live run.
+
+Deployed and dry-run tested against both `craftbeer-kiwi-DEV` (20 candidates found, 0 errors, all correctly Mapbox-geocoded) and production (20 candidates found, **18 correctly skipped via existing `place_id` dedup**, 2 genuine new candidates found with clean Mapbox-derived data). Confirms both the geocoding fix and the dedup logic work correctly against real data. No live run performed yet — this was dry-run verification only; an actual live insert remains a normal future use of the (now-fixed) function, not outstanding design work.
+
+Also surfaced in production dry-run results: `Garage Project Wild Workshop`'s `place_id` was already present in the `breweries` table (`is_published: true`) — confirms dedup correctly recognized it as an existing row (added 25 July, already accurately reflected in `todo.md`'s "Recently done" log — no doc correction needed here).
+
+**Copyright/ToS risk: closed.** Google Places content used by craftbeer.kiwi is now limited to `place_id` (used only for dedup and status lookups, which Google's caching exceptions permit indefinitely) plus `name`/`website` (treated as low-risk factual metadata, gated behind manual review before ever being published). All displayed coordinates and addresses — both the existing 23-brewery dataset and everything `brewery-discover` inserts going forward — are independently sourced via Mapbox, not stored Google output. The original concern (Places content displayed on a non-Google map, coordinates cached indefinitely past the 30-day allowance) no longer applies to any current or future data path.
+
+**Ruled out (for now):** Switching the map itself to Google Maps JS — would fully resolve the license question but throws away the existing Mapbox/supercluster/theming build for a risk judged lower-probability than the rebuild cost. Doing nothing and monitoring — rejected as a standing position (though acceptable as a short-term stance) since it leaves a known contract breach undocumented and unaddressed indefinitely.
+
+---
+
+## Ongoing automation output: exceptions-only, not full reports
+
+**ID:** `DEC-032`
+
+**Decided (31 July):** Once initial buildout (national coverage, schema, core features) is done, recurring/scheduled automated checks should surface only exceptions — rows that are new, flagged, or changed and need a human look — rather than a full report or bulk dump on every run. Applies to `brewery-sync` (closure detection), the planned data-drift monitoring (`concept-data-drift.md`), and any future recurring check (re-running `brewery-discover` post-rollout, periodic NZBN re-verification).
+
+**Why:** As the directory scales toward national coverage, a scheduled job that reports "checked 200, 197 unchanged, 3 flagged" every run is worse than one that reports the 3 — the noise buries the thing that actually needs attention, and it's the opposite of what makes unattended scheduling safe. This formalises the pattern `brewery-sync`'s `flagged_for_review` output already follows by design (`DEC-005`) into an explicit standing principle for every future automated check, rather than something that happens to be true of the first one built.
+
+**What this looks like in practice:** a scheduled run's output/log should default to "what changed since last run," with full/verbose output available on demand (e.g. a manual parameter) rather than as the default. Doesn't change the two-source-agreement gate on auto-closing a brewery (`DEC-005`) — this is about what the *output* looks like, not what automation is allowed to act on unattended.
+
+**Ruled out:** Leaving report format undecided per-feature and deciding it fresh each time a new check gets built — risked each one defaulting to a full dump simply because that's the easier first thing to write, the same way `brewery-discover`'s dry-run-by-default gap (`DEC-024`) sat unfixed until specifically audited.
+
+---
+
+## `parent_brewery_id` added — structural link between multi-site brand rows
+
+**ID:** `DEC-031`
+
+**Decided:** Added `parent_brewery_id` (nullable `uuid`, self-referencing foreign key to `breweries.id`, `on delete set null`) to the `breweries` table. Built in `craftbeer-kiwi-DEV` first, then production. Backfilled six rows across four brand groups:
+
+| Satellite row | Points to (flagship row) |
+|---|---|
+| Garage Project Aro Taproom | Garage Project |
+| Garage Project Leeds Street | Garage Project |
+| Garage Project Wild Workshop | Garage Project |
+| Panhead Tory Street | Panhead Custom Ales |
+| Double Vision Brewing - DUB HUB Island Bay | Double Vision Brewing |
+| Waitoa Victoria St | Waitoa |
+
+All other rows (standalone breweries, no known multi-site relationship) stay `null` — no backfill needed, non-breaking addition.
+
+**Why:** Andy asked whether the table had any way to represent that some breweries are related (Garage Project's four sites, specifically). It didn't — the only prior signal was `nzbn`, already found unreliable for this exact purpose (`DEC-021`: breaks down for conglomerate-owned brands like Panhead/Lion and Tuatara/DB, and the Garage Project family's `nzbn` is blank and watchlisted, `TD-024`). Site relationships were otherwise only implicit in the naming convention (`"Garage Project Leeds Street"` reads as related to `"Garage Project"` to a human, not to any query).
+
+**Why an FK to `id`, not a `brand_group` text field:** `id` is the one thing on a row guaranteed not to drift over time — a rename, relocation, or any other edit to `name`/`address` doesn't touch it. A text field like `brand_group = 'Garage Project'` would need to be kept in sync by hand across every row in the group and could silently fall out of step if the flagship row's own name ever changed. Pointing at `id` avoids that class of drift entirely.
+
+**Scope, deliberately narrow:** this is brand grouping, not a general hierarchy — one level (satellite → flagship), not a tree, and nothing currently reads or displays this in the frontend. It exists to make the relationship queryable and to unblock future features (grouped map display, brand-level filtering, a "same brewery, another location" popup link) without redesigning the schema when one of those gets built.
+
+**Known boundary, not a gap:** Three Sisters Brewery Ltd stays `parent_brewery_id = null` — its actual flagship is in New Plymouth, outside this (Wellington-only) directory, so there's no row here to point at. Worth revisiting once national expansion adds a New Plymouth row for real.
+
+**Ruled out:** A plain `brand_group` text field (see above — drift risk). A general-purpose hierarchy/tree structure — no current need beyond one level, and premature given only four brand groups exist today.
+
+---
+
+
 
 **ID:** `DEC-030`
 

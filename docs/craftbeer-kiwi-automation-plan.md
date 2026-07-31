@@ -1,6 +1,6 @@
 # craftbeer.kiwi — Automated Brewery Discovery & Closure Detection
 
-**Written:** 11 July 2026 · **Updated:** 30 July 2026 (AP-PREREQ IDs added to the National Expansion Prerequisites; AP-PREREQ-3 marked resolved, closing the gap flagged in todo.md/decisions.md)
+**Written:** 11 July 2026 · **Updated:** 31 July 2026 (added "Ongoing automation output: exceptions-only" section, formalising `DEC-032`)
 **Purpose:** Living reference for the automation build — why it exists, the architecture, current status, and what's still ahead. Earlier versions of this doc were a forward-looking build plan; as of 20 July the core of both Edge Functions is written and deployed, and as of 27 July both have been successfully tested end-to-end for the first time — this version describes what's actually built, what's actually been proven to work, and what's still planned.
 
 ---
@@ -20,6 +20,23 @@ Full automation means changes publish to the live site without a human looking a
 - There's no way to fully eliminate these risks while staying hands-off — they're inherent to trusting third-party data without a review step
 
 The safeguard built in regardless: **never hard-delete a brewery row.** Use an `is_active` flag instead. Automation can flip it to `false`, but the data isn't destroyed — a bad signal is a one-line fix, not lost work. See `craftbeer-kiwi-decisions.md` for the full soft-delete rationale.
+
+---
+
+## Ongoing automation output: exceptions-only
+
+**Standing principle, `DEC-032` (31 July):** once initial buildout — national coverage, core schema, core features — is done, every recurring/scheduled check this project runs should default to reporting **only what changed or needs a human look**, not a full status dump of everything checked.
+
+This already describes how `brewery-sync` was built (`flagged_for_review` plus the exceptions-report query below), but it wasn't written down as a rule until now — it was true of the first check almost by accident, not by design. Making it explicit means every future recurring check inherits the same shape without having to independently arrive at it:
+
+- **`brewery-sync` (closure detection)** — already exceptions-only in practice: `{"checked":19,"flagged":0,"errors":[]}` is a small enough summary to be fine as-is, and the real "what needs a look" list lives in the `flagged_for_review` query, not the run's own log output.
+- **Data-drift monitoring (planned, `concept-data-drift.md`)** — whatever this becomes, its output should be "these N brewery attributes look like they may have changed," not a full re-listing of every brewery's current data each run.
+- **`brewery-discover`, once scheduled post-rollout** — should report new candidates found (ideally close to zero on most runs, once national coverage is real), not a "searched X, found Y existing, Z new" verbose log every time by default.
+- **Periodic NZBN re-verification** (once NZBN is wired into `brewery-sync`) — same shape: report entities whose status changed since last check, not a full re-print of every brewery's NZBN standing.
+
+**What this does *not* change:** the two-source-agreement gate on auto-closing a brewery (`DEC-005`) still applies regardless of output format — this principle is about what a check *reports*, not what it's allowed to *act on* unattended. A quiet, exceptions-only log is still only ever allowed to flag, not silently close, on a single-source signal.
+
+**In practice:** default output/log format is the short exceptions list; a verbose "everything checked" mode can still exist behind an explicit parameter for debugging or a first-run sanity check, the same way `brewery-discover`'s `dryRun` is opt-out rather than removed entirely.
 
 ---
 
@@ -59,12 +76,14 @@ Two separate functions, deliberately kept apart (see `craftbeer-kiwi-decisions.m
 2. Per the two-source-agreement rule (see `craftbeer-kiwi-decisions.md`): a `CLOSED_PERMANENTLY` signal from Places alone writes `flagged_for_review = true`, **not** `is_active = false`, because NZBN isn't wired in yet to corroborate.
 3. `last_verified` is updated regardless of outcome.
 
-**`brewery-discover`** (discovery) — written and deployed, and as of 27 July **successfully tested end-to-end for the first time**: `{"found":20,"inserted":12,"skipped":8}`. Logic (as built and now confirmed working):
+**`brewery-discover`** (discovery) — written and deployed, and as of 27 July **successfully tested end-to-end for the first time**: `{"found":20,"inserted":12,"skipped":8}`. Logic as originally built:
 1. Call the Places API text search (`brewery`-style query, biased to the Wellington region).
 2. For each result, check if its `place_id` already exists → skip if so (8 skipped this run — existing breweries correctly recognised).
 3. If new: insert a row with name, address, lat/long, website, `place_id`, `is_active = true`, `last_verified = now()`.
 
-A `dryRun` safety flag (return what would be inserted without writing to the live table) was discussed back on 20 July as worth adding before the first real run — **this did not get built before the first run happened, and the results below are exactly the scenario it was meant to catch.** Still worth building before any future unsupervised run.
+**Updated 31 July** — step 3 now geocodes each candidate's address via Mapbox rather than storing Places' own coordinates/address directly (Google's Maps Platform terms don't allow displaying Places content on a non-Google map, and craftbeer.kiwi uses Mapbox — see `craftbeer-kiwi-decisions.md`, `DEC-033`, for the full reasoning). The insert now also explicitly sets `is_published = false`/`has_theme = false`, fixing a separate bug where these were previously left unset and would have failed the `theme_required_to_publish` constraint on the next live run. Re-tested dry-run against both `craftbeer-kiwi-DEV` (20 found, 0 errors) and production (20 found, 18 correctly deduped, 2 genuine new candidates, cleanly geocoded) — confirms both the geocoding fix and the existing dedup logic work correctly.
+
+The `dryRun` safety flag (return what would be inserted without writing to the live table) was discussed back on 20 July as worth adding before the first real run — **this did not get built before the 27 July run happened, and the results from that run are exactly the scenario it was meant to catch.** It was subsequently built 28 July as dry-run-by-default (`?live=true` forces a real write) — see `craftbeer-kiwi-decisions.md` `DEC-014`/`DEC-018` — though a 29 July security audit found the actual shipped code still read the flag opt-in rather than opt-out, fixed the same day (see `craftbeer-kiwi-security.md`). All dry-run testing referenced above (31 July) confirms this default-safe behaviour is genuinely working, not just documented as working.
 
 **Fixed 27 July — the actual root cause of the `sb_secret_...` 401 issue:** not a Supabase platform bug after all. `@supabase/server`'s secret-key auth mode requires a *named* key — the code must specify `auth: "secret:<name>"`, where `<name>` matches the label given to the key in Supabase's Settings → API Keys screen. Both functions were originally written with just `auth: "secret"` (no name), which the SDK can't match to anything, producing a generic "invalid credentials" 401 regardless of which valid key was sent. Fixed by changing both functions to `auth: "secret:brewery_sync_v2"` (the name of the currently-active secret key) and redeploying. Confirmed working via the dashboard's test panel, sending the key only in the `apikey` header (not `Authorization` — that header is reserved for user-JWT auth mode, a different pattern entirely, and sending an API key there is a documented common mistake per Supabase's own docs).
 
@@ -89,6 +108,8 @@ Name-based discovery (this function, plus the Places API and excise-list cross-c
 ---
 
 ## Exceptions report
+
+This is the first, concrete example of the "Ongoing automation output: exceptions-only" principle above — built before that principle was written down as a standing rule, now the reference pattern for every future check.
 
 Rather than `flagged_for_review` sitting quietly in the table, one saved query surfaces everything worth a human look:
 
@@ -179,11 +200,11 @@ For completeness — `api.business.govt.nz` hosts APIs beyond NZBN and Insolvenc
 
 **ID convention:** each prerequisite below carries a permanent `AP-PREREQ-N` ID, assigned once and never renumbered - same pattern as `craftbeer-kiwi-decisions.md`'s `DEC-NNN` and `craftbeer-kiwi-todo.md`'s `TD-NNN` IDs. Added 30 July after these items were already being referenced elsewhere by plain position number ("prerequisite #3"), which is exactly the kind of reference that breaks if this list is ever reordered.
 
-1. **`AP-PREREQ-1` — `dryRun` flag on `brewery-discover`.** Already a standing to-do; now a hard blocker rather than a nice-to-have. Must return candidate rows without writing to the live table.
+1. **`AP-PREREQ-1` — `dryRun` flag on `brewery-discover`.** Already a standing to-do; now a hard blocker rather than a nice-to-have. Must return candidate rows without writing to the live table. **Resolved 28 July, re-confirmed working 31 July** — dry-run is now the default (`?live=true` forces a real write); dry-run tested against both DEV and production on 31 July alongside the Mapbox re-sourcing fix (`craftbeer-kiwi-decisions.md`, `DEC-033`).
 2. **`AP-PREREQ-2` — Query narrowing decision.** Investigate whether Places' text search API supports excluding bar/pub categories, to reduce the false-positive rate before multiplying it across 10+ regions. If it can't be narrowed at the API level, the manual-triage step per region needs to be budgeted as real time in each region's rollout, not treated as a formality.
 3. **`AP-PREREQ-3` — Region boundary definition.** Decide whether "a region" means a Places API geographic bounding box or a text-query bias per city/district (current Wellington query uses the latter). This determines how many separate `brewery-discover` runs a full national rollout actually is. **Resolved 30 July** — `region` column added and backfilled using the Brewers Guild of NZ's own regional groupings rather than inventing a bespoke boundary scheme. See `craftbeer-kiwi-decisions.md` (`DEC-026`) for the full writeup, and its flagged Guild-taxonomy-vs-rollout-phase naming mismatch (Guild groups Northland+Auckland together and keeps Waikato/Bay of Plenty separate, while the rollout phases below group "Auckland and Canterbury" together then "Waikato, Bay of Plenty, Otago" as a second batch) - a rollout-phase-to-region lookup will be needed at expansion time, not yet built.
 
-None of the phase work below should start until `AP-PREREQ-1` and `AP-PREREQ-2` are resolved (`AP-PREREQ-3` is now done).
+None of the phase work below should start until `AP-PREREQ-2` is resolved (`AP-PREREQ-1` and `AP-PREREQ-3` are now done).
 
 **Candidate tool for `AP-PREREQ-3` — Places Aggregate API (found 29 July).** Google's Places Aggregate API (formerly Places Insights API, GA as of early 2026) returns place counts/density for a given area and place type, rather than individual results — could answer "how many brewery-type places does Google think exist in Auckland" as a single query before running a full `brewery-discover` pass there. Two possible uses: (1) sizing the manual-triage workload for a region ahead of time, so the per-region workflow's triage step isn't a surprise; (2) a cheap completeness check — comparing Aggregate's count against what Text Search actually returned, to catch a region where discovery silently missed a chunk. **Not yet actioned:** it's a separate billed API on top of existing Places usage, and NZ coverage / per-request pricing haven't been confirmed against the Cloud Console — needs checking before it's relied on, not assumed from Google's marketing pages. Now that `AP-PREREQ-3` itself is resolved via the Guild taxonomy, this tool is optional supplementary tooling rather than blocking - worth revisiting only if a completeness check against Places' own counts becomes useful later.
 

@@ -108,6 +108,7 @@ Organised loosely around **OWASP ASVS Level 1** chapters (Access Control, Authen
 - [x] `brewery-discover` remains dry-run-by-default (per 28 July decision) — **confirmed fixed and verified 29 July**; was previously not actually implemented despite being marked as a decision
 - [ ] 2FA still active on GitHub, Supabase, Vercel
 - [ ] Google Cloud project (`craftbeer-kiwi-automation`) API keys scoped to only what's needed (Places API etc.), not broad project-level access
+- [ ] **New 31 July** — `craftbeer-kiwi-DEV` now also holds its own live `GOOGLE_PLACES_API_KEY`/`MAPBOX_TOKEN`/`brewery_sync_v2` secrets (previously only production did — `brewery-discover` had never been deployed to DEV before). Confirm at next audit that DEV's copies get the same scrutiny as production's (scoping, rotation, no accidental over-privilege) rather than being treated as lower-stakes by default just because it's the dev environment.
 - [ ] Rate limiting / abuse protection considered for any function reachable without auth
 
 ### Data protection (ASVS: Data Protection)
@@ -117,7 +118,7 @@ Organised loosely around **OWASP ASVS Level 1** chapters (Access Control, Authen
 
 ### Dependencies & code (ASVS: general)
 - [ ] Dependencies checked for known vulnerabilities (`npm audit` or equivalent)
-- [ ] Third-party scripts (Mapbox, analytics) loaded from trusted sources only
+- [x] Third-party scripts (Mapbox, analytics) loaded from trusted sources only — **Vercel Web Analytics specifically checked 31 July**: no cookies, no persistent identifiers, session hash discarded after 24 hours, data collected is anonymous and not tied to any individual or IP address (per Vercel's own privacy documentation). Fits the existing no-personal-information posture — confirmed, not just assumed.
 
 ### Infrastructure (not ASVS — added for this project)
 - [ ] Domain/DNS configuration reviewed once craftbeer.kiwi is live (registrar account security, DNS record integrity)
