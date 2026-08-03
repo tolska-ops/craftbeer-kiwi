@@ -8,6 +8,46 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
+## SMTP provider: Resend, sandbox sender only — domain verification still required
+
+**ID:** `DEC-035`
+
+**Decided (3 August):** Configured Resend as `craftbeer-kiwi-DEV`'s custom SMTP provider (host `smtp.resend.com`, port 465, API key auth), replacing Supabase's built-in mailer.
+
+**Why this was needed, not optional:** Supabase's default email service caps at **2 auth emails/hour**, hard-limited regardless of plan — hit almost immediately during TD-048 testing (invite + magic-link retries). This isn't a workaround for testing; Supabase's own guidance is that the built-in mailer isn't meant for production auth traffic at all, so this was going to be required before any real launch regardless.
+
+**Finding — sandbox sender restriction (discovered during testing):** Resend's default test sender (`onboarding@resend.dev`, used because domain verification was deliberately skipped to save time — see below) can only send to the email address associated with the Resend account itself (`andy@tolska.com`). Any other recipient fails with "Error sending invite email." This blocks inviting anyone except Andy until resolved.
+
+**Deliberately deferred, not forgotten:** verifying `craftbeer.kiwi` as a domain in Resend (SPF/DKIM/DMARC TXT records at Discount Domains, propagation time uncertain — same category of wait as the original domain→Vercel DNS switch) was skipped today to fit the session's time budget. **This is a hard blocker on inviting any tester besides Andy** — tracked as `TD-049`.
+
+**Secret created:** Resend API key, scoped "All domains" (appropriate for now since no domain is verified yet — would narrow to `craftbeer.kiwi` once verified). Saved to Bitwarden alongside the project's other API keys. Needs the same standing scrutiny as other secrets at next security audit — see `craftbeer-kiwi-security.md`.
+
+---
+
+## Pre-launch site access: Supabase Auth allow-list, not Vercel Authentication
+
+**ID:** `DEC-034`
+
+**Status update (3 August):** Build started same day as decided. See `TD-048` for exactly what's verified vs. still open — DEV-only, invite-to-self confirmed working end-to-end (Resend → Supabase → magic link → app session), several DoD items still open. Not yet production, not yet usable for anyone but Andy (see `DEC-035`).
+
+**Decided (3 August):** Gate the whole site pre-launch using Supabase Auth (magic-link email login) checked against an allow-list, rather than Vercel Authentication.
+
+**Context — options considered (first raised 2 August, mobile, not built that session):**
+1. Custom Vercel Edge Middleware password gate — free, quick, but a single shared password with no per-person revocation.
+2. Vercel's built-in Password Protection — requires the Advanced Deployment Protection add-on, US$150/month on Pro. Ruled out on cost.
+3. Vercel Authentication — free, per-person, revocable individually via the Vercel project/team. No code required. Trade-off: each tester needs their own Vercel account (friction for non-technical testers), and access management lives inside Vercel's team system rather than something craftbeer.kiwi owns.
+4. Supabase Auth allow-list — magic-link email login checked against a list craftbeer.kiwi controls. Lower friction for testers (email only, no account creation elsewhere). More build work than option 3, and doubles as the same infrastructure a future real user-accounts feature would need.
+
+**Why Option 4 over Option 3:** explicitly chosen for lower tester friction (no Vercel account needed) and to keep access control inside the project rather than delegated to Vercel's team system.
+
+**Trade-off knowingly accepted:** this pre-empts the still-open question of whether craftbeer.kiwi ever gets real user accounts as a product feature (flagged as undecided in `craftbeer-kiwi-concept-ai-companion-vision.md`, alongside the OAuth-flow assumption in the AI companion vision docs' User Journey). Building Supabase Auth now for site-gating purposes means that infrastructure will already exist if/when that product decision is made — this was raised explicitly before deciding, and accepted as a reasonable side-effect rather than an accidental one.
+
+**Refinement (3 August, before build started):** no custom allow-list table needed — Supabase Auth's own user list *is* the allow-list. Public sign-ups disabled in Auth settings; access granted only by inviting an email via the Supabase dashboard (Authentication → Users → Invite user), revoked by deleting/banning that user there. One admin surface, not two.
+
+**Build status:** in progress, DEV only — see `TD-048` for the current verified/open breakdown.
+
+---
+
 ## Google Places data: signal only, not source of record — coordinates/name/address to be independently sourced
 
 **ID:** `DEC-033`

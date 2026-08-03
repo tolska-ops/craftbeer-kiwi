@@ -4,7 +4,7 @@
 
 **Status:** First audit complete (29 July) — two findings, both fixed and verified same session. Next audit: trigger-based (see below), or ~2–3 months.
 
-**Last updated:** 29 July 2026 (first audit completed — legacy service_role key disabled, brewery-discover dry-run-by-default gap found and fixed)
+**Last updated:** 3 August 2026 (Authentication section no longer N/A — Supabase Auth build in progress in DEV, `TD-048`; new Resend SMTP secret logged, `TD-049` domain verification still open; first audit completed 29 July — legacy service_role key disabled, brewery-discover dry-run-by-default gap found and fixed)
 
 **Framework alignment:** [OWASP ASVS](https://owasp.org/www-project-application-security-verification-standard/) Level 1, plus NZ legal requirements (Privacy Act 2020). See "Framework & compliance context" below for why.
 
@@ -98,8 +98,10 @@ Organised loosely around **OWASP ASVS Level 1** chapters (Access Control, Authen
 - [ ] Each Edge Function's actual permissions match its purpose (e.g. `brewery-discover` shouldn't have more write scope than it needs)
 
 ### Authentication & session management (ASVS: Authentication, Session Management)
-- [ ] N/A currently — no login system exists (by design; see Known Accepted Risks for the anonymous trail ID trade-off)
-- [ ] If this changes: re-run this section against ASVS's Authentication chapter properly (password/session handling, not just a placeholder)
+- [ ] **Changed 3 August** — no longer N/A. Supabase Auth (magic-link) build in progress in DEV, see `craftbeer-kiwi-todo.md` `TD-048` for exact verified/open state. Full ASVS Authentication chapter review still outstanding — do this properly at the next audit or before this reaches production, not as a placeholder tick.
+- [ ] Public sign-ups confirmed disabled in DEV Auth settings (done, per `TD-048`) — re-confirm before production rollout, since this is the entire access-control mechanism.
+- [ ] Session handling (`onAuthStateChange`, `getSession`) reviewed for correctness beyond "it worked in one manual test" — e.g. what happens on token expiry mid-session, not yet exercised.
+- [ ] Revocation actually tested (delete/ban a user, confirm blocked) — not yet done, tracked in `TD-048`.
 
 ### Configuration & secrets (ASVS: Configuration)
 - [ ] No API keys, secrets, or tokens committed to GitHub (spot-check recent commits, not just `.env` presence)
@@ -110,6 +112,7 @@ Organised loosely around **OWASP ASVS Level 1** chapters (Access Control, Authen
 - [ ] Google Cloud project (`craftbeer-kiwi-automation`) API keys scoped to only what's needed (Places API etc.), not broad project-level access
 - [ ] **New 31 July** — `craftbeer-kiwi-DEV` now also holds its own live `GOOGLE_PLACES_API_KEY`/`MAPBOX_TOKEN`/`brewery_sync_v2` secrets (previously only production did — `brewery-discover` had never been deployed to DEV before). Confirm at next audit that DEV's copies get the same scrutiny as production's (scoping, rotation, no accidental over-privilege) rather than being treated as lower-stakes by default just because it's the dev environment.
 - [ ] Rate limiting / abuse protection considered for any function reachable without auth
+- [ ] **New 3 August** — Resend API key added (custom SMTP for `craftbeer-kiwi-DEV`'s Supabase Auth, replacing the built-in mailer's 2-emails/hour limit). Scoped "All domains" for now (no verified domain yet — see `TD-049`), saved to Bitwarden. Confirm at next audit: scoped down to `craftbeer.kiwi` once domain verification lands, not left broader than needed indefinitely; not committed anywhere in the repo (it lives in Supabase's dashboard config, not `.env.local`, so lower risk than a typical code secret, but worth the same spot-check).
 
 ### Data protection (ASVS: Data Protection)
 - [ ] No sensitive data reachable via browser devtools (network tab, localStorage) beyond what's intended (e.g. anonymous trail ID is expected to be visible — that's the accepted design, not a bug)
