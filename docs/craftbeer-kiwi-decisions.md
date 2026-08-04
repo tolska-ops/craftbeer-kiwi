@@ -8,6 +8,32 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 ---
 
+## Pre-launch site access gate: found non-functional despite being logged as "in progress" — login UI and session gate built, verified through the app's own UI
+
+**ID:** `DEC-036`
+
+**Found (4 August):** while working through `TD-048`'s "still open" checklist from 3 August, discovered the site access gate did not actually gate anything. `App.jsx` had no session check anywhere — it fetched breweries and rendered the map unconditionally on mount, regardless of whether a valid Supabase session existed. Separately, `Login.jsx` was absent from `src/` at session start, despite the 3 August `todo.md` entry stating it had been "built and deployed to DEV." **Root cause confirmed afterward:** the file had been downloaded but never copied into the `src` folder — a real file that existed, just not in the place the app could actually import it from. A banned test account, deliberately used to exercise revocation, confirmed the missing gate directly: Supabase correctly rejected the login attempt (`error_code=user_banned` in the redirect), but the app rendered the full map anyway.
+
+**Why this happened:** every 3 August test — invite, magic link, ban — was run through Supabase's dashboard or hosted auth endpoints directly, never through the app's own UI, because no app-side login screen existed to test through. The underlying auth mechanics were real and working; the integration point that was supposed to consume them into an actual access gate wasn't built. This is the same failure shape as `DEC-024`: a doc asserting a verified state that a check through the deployed artefact itself would have caught immediately.
+
+**Fixed (4 August):**
+- Built `Login.jsx` — a minimal magic-link form calling `supabase.auth.signInWithOtp` with `shouldCreateUser: false`. That flag is load-bearing, not stylistic: without it, Supabase's default behaviour on `signInWithOtp` auto-creates an account for any email that requests a link, which would let anyone who found the URL self-provision access and defeat the entire invite-only model. With it, an uninvited email is cleanly rejected at the form.
+- Added a real session gate to `App.jsx`: `supabase.auth.getSession()` on mount plus an `onAuthStateChange` listener, with the map's render blocked entirely until a valid session exists. A three-way render state (loading / no session → `Login` / valid session → app) avoids a flash of protected content before the session check resolves.
+- Parses `error_code`/`error_description` out of the redirect URL hash (how Supabase reports a rejected magic link, e.g. a ban) and surfaces it on the login screen, rather than letting it disappear silently.
+
+**Verified (4 August), through the app's own UI rather than Supabase's dashboard/API:**
+- Fresh incognito session, no prior login → login screen shown, no manual workaround needed.
+- App renders correctly post-login.
+- Non-invited email → rejected inline at the form ("Signups not allowed for otp"), no email sent.
+- Banned account → rejected on a real login attempt via the app, error shown on the login screen (not a blank page or the map).
+- Valid invited account → full loop closes end-to-end through the app: invite → email → magic link → login screen → session → map.
+
+**Not yet done:** production deployment. Same four checks need re-running there before `TD-048` is fully closed — DEV verification does not carry over automatically.
+
+**Retrospective note worth carrying forward:** a feature that's tested exclusively through the tool managing it (here, Supabase's dashboard) rather than through the path a real user takes (the app's own login screen) can look fully verified while being completely non-functional at the point that actually matters. Worth checking, for any future gated/auth-adjacent feature, that at least one verification pass goes through the real front door.
+
+---
+
 ## SMTP provider: Resend, sandbox sender only — domain verification still required
 
 **ID:** `DEC-035`
@@ -18,7 +44,9 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 **Finding — sandbox sender restriction (discovered during testing):** Resend's default test sender (`onboarding@resend.dev`, used because domain verification was deliberately skipped to save time — see below) can only send to the email address associated with the Resend account itself (`andy@tolska.com`). Any other recipient fails with "Error sending invite email." This blocks inviting anyone except Andy until resolved.
 
-**Deliberately deferred, not forgotten:** verifying `craftbeer.kiwi` as a domain in Resend (SPF/DKIM/DMARC TXT records at Discount Domains, propagation time uncertain — same category of wait as the original domain→Vercel DNS switch) was skipped today to fit the session's time budget. **This is a hard blocker on inviting any tester besides Andy** — tracked as `TD-049`.
+**Resolved (4 August):** `craftbeer.kiwi` verified in Resend using its default sending-subdomain pattern (`send.craftbeer.kiwi`) for MX/SPF, with DKIM and DMARC (`p=none`, monitor-only to start) at the apex. **Correction found during testing:** the Supabase SMTP sender was initially set to `noreply@send.craftbeer.kiwi`, which failed with a 403 — Resend only authorizes sending from the domain it verified (`craftbeer.kiwi` itself); the `send` subdomain carries only bounce-handling records, not a separate sending identity. Corrected to `noreply@craftbeer.kiwi`, and a real test invite to `andrew.tolley@gmail.com` (a non-`@tolska.com` address) delivered successfully — the sandbox restriction is fully lifted. The apex-conflict concern raised when the subdomain approach was chosen turned out not to apply either way: Resend's MX record lives only on `send.craftbeer.kiwi`, not the apex, so a future mailbox at `craftbeer.kiwi` remains unaffected regardless of which address sends from it. Full detail in `craftbeer-kiwi-todo.md` `TD-049`.
+
+**Remaining, not blocking:** narrow the Resend API key's scope from "All domains" to `craftbeer.kiwi` now that a real domain exists to scope it to.
 
 **Secret created:** Resend API key, scoped "All domains" (appropriate for now since no domain is verified yet — would narrow to `craftbeer.kiwi` once verified). Saved to Bitwarden alongside the project's other API keys. Needs the same standing scrutiny as other secrets at next security audit — see `craftbeer-kiwi-security.md`.
 
@@ -28,7 +56,7 @@ Each entry has a unique ID (`DEC-001`, `DEC-002`, ...), assigned in chronologica
 
 **ID:** `DEC-034`
 
-**Status update (3 August):** Build started same day as decided. See `TD-048` for exactly what's verified vs. still open — DEV-only, invite-to-self confirmed working end-to-end (Resend → Supabase → magic link → app session), several DoD items still open. Not yet production, not yet usable for anyone but Andy (see `DEC-035`).
+**Status update (4 August):** DEV build complete and all DoD items verified through the app's own UI, after finding and fixing a real gap (see `DEC-036`) — the gate had not actually been functional despite 3 August's status update. See `TD-048` for the verified checklist. Production deployment still outstanding. Not yet usable for anyone but Andy in practice, since `TD-049` (Resend domain verification) is still blocking real testers regardless of the gate itself now working — see `DEC-035`.
 
 **Decided (3 August):** Gate the whole site pre-launch using Supabase Auth (magic-link email login) checked against an allow-list, rather than Vercel Authentication.
 

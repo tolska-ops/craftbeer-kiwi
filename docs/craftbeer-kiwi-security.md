@@ -98,10 +98,10 @@ Organised loosely around **OWASP ASVS Level 1** chapters (Access Control, Authen
 - [ ] Each Edge Function's actual permissions match its purpose (e.g. `brewery-discover` shouldn't have more write scope than it needs)
 
 ### Authentication & session management (ASVS: Authentication, Session Management)
-- [ ] **Changed 3 August** — no longer N/A. Supabase Auth (magic-link) build in progress in DEV, see `craftbeer-kiwi-todo.md` `TD-048` for exact verified/open state. Full ASVS Authentication chapter review still outstanding — do this properly at the next audit or before this reaches production, not as a placeholder tick.
-- [ ] Public sign-ups confirmed disabled in DEV Auth settings (done, per `TD-048`) — re-confirm before production rollout, since this is the entire access-control mechanism.
-- [ ] Session handling (`onAuthStateChange`, `getSession`) reviewed for correctness beyond "it worked in one manual test" — e.g. what happens on token expiry mid-session, not yet exercised.
-- [ ] Revocation actually tested (delete/ban a user, confirm blocked) — not yet done, tracked in `TD-048`.
+- [x] **Updated 4 August** — Supabase Auth (magic-link) gate built and verified through the app's own UI in DEV: session check (`getSession`/`onAuthStateChange`) actually blocks the map from rendering without a valid session. Note: an earlier 3 August status claiming this was "built and deployed" was inaccurate — the app had no session check at all until 4 August. See `craftbeer-kiwi-decisions.md` `DEC-036`. Full ASVS Authentication chapter review still outstanding — do this properly before production rollout, not as a placeholder tick.
+- [x] Public sign-ups confirmed disabled — verified two ways: dashboard setting, and a live test showing an uninvited email rejected at the login form ("Signups not allowed for otp"). Re-confirm again once deployed to production.
+- [ ] Session handling reviewed for correctness beyond the manual tests run so far (login, ban, uninvited-email rejection) — e.g. what happens on token expiry mid-session, not yet exercised.
+- [x] Revocation tested (4 August) — banned a real test account, confirmed a subsequent login attempt through the app is rejected with the ban error shown on the login screen, not a blank page or the map.
 
 ### Configuration & secrets (ASVS: Configuration)
 - [ ] No API keys, secrets, or tokens committed to GitHub (spot-check recent commits, not just `.env` presence)

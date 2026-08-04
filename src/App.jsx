@@ -4,6 +4,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import mapboxgl from 'mapbox-gl'
 import Supercluster from 'supercluster'
 import { supabase } from './supabaseClient'
+import Login from './Login' // TODO: confirm this path/export matches your actual Login.jsx
 import './App.css'
 import { Analytics } from '@vercel/analytics/react'
 
@@ -82,6 +83,9 @@ const THEMES = {
 // once they have real Mapbox style URLs (see TD-023).
 const VISIBLE_THEME_IDS = ['light', 'dark'];
 function App() {
+  // undefined = still checking on first load, null = confirmed no session
+  const [session, setSession] = useState(undefined)
+  const [authError, setAuthError] = useState(null)
   const [breweries, setBreweries] = useState([])
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState(null)
@@ -101,6 +105,36 @@ useEffect(() => {
   const theme = THEMES[themeId];
   const mapRef = useRef(null)
   const headerRef = useRef(null)
+
+  // --- Auth gate ---
+  // Checks for an existing session on load, then stays in sync with
+  // login/logout/ban/token-refresh events. Nothing below this should
+  // render the map until `session` is a real, non-null session object.
+  useEffect(() => {
+    // Supabase's redirect on a rejected magic link (e.g. a banned user)
+    // comes back as #error_code=user_banned&error_description=... in the
+    // URL hash rather than a normal auth event — surface it explicitly.
+    const hashParams = new URLSearchParams(window.location.hash.slice(1))
+    const errorCode = hashParams.get('error_code')
+    if (errorCode) {
+      setAuthError(hashParams.get('error_description') || errorCode)
+      // Clean the error out of the URL so a refresh doesn't re-show it
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session)
+      }
+    )
+
+    return () => subscription.unsubscribe()
+  }, [])
+
   useEffect(() => {
    if (!navigator.geolocation) {
   // Geolocation not supported at all — don't guess, leave marker unrendered.
@@ -123,6 +157,7 @@ useEffect(() => {
 }, []);
 
   useEffect(() => {
+    if (!session) return
     async function fetchBreweries() {
       const { data, error } = await supabase.from('breweries').select('*').eq('is_active', true).eq('venue_type', 'brewery').eq('is_published', true)
       if (error) {
@@ -132,7 +167,7 @@ useEffect(() => {
       }
     }
     fetchBreweries()
-  }, [])
+  }, [session])
 
   // Fit the initial view to show all breweries once data + map are ready
   useEffect(() => {
@@ -180,6 +215,16 @@ const labelGeoJSON = useMemo(() => ({
     setBounds([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()])
     setZoom(mapRef.current.getZoom())
   }, [])
+
+  // Still checking for an existing session on first load — render nothing
+  // rather than risk a flash of the map before we know the answer.
+  if (session === undefined) return null
+
+  // No valid session — show the login screen instead of the app.
+  // TODO: confirm Login accepts an `authError` prop (or adjust the prop
+  // name/handling to match however Login.jsx actually surfaces errors)
+  // so a banned/rejected user sees why, not just an empty form.
+  if (!session) return <Login authError={authError} />
 
   return (
     <div className="app-container">
