@@ -39,6 +39,7 @@ function getBreweryTheme(name) {
     'Double Vision Brewing - DUB HUB Island Bay': { fill: '#9B8FF5', stroke: '#FFF', iconColor: '#FFF' },
     'Panhead Tory Street': { fill: '#2A2A2A', stroke: '#D4720A', iconColor: '#D4720A' },
     'Waitoa Victoria St': { fill: '#575757', stroke: '#E8720C', iconColor: '#FFF' },
+    'Eddyline Brewery Wellington Taproom': { fill: '#164863', stroke: '#DDB967', iconColor: '#FFF' },
   }
   return themes[name] || { fill: '#D4720A', stroke: '#FFF', iconColor: '#FFF' }
 }
